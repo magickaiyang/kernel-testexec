@@ -173,8 +173,9 @@ static inline struct page *compound_head(struct page *page)
 {
 	unsigned long head = READ_ONCE(page->compound_head);
 
-	if (unlikely(head & 1))
-		return (struct page *) (head - 1);
+	if (unlikely(head & 1)) {
+    return (struct page *) (head - 1);
+  }
 	return page;
 }
 
