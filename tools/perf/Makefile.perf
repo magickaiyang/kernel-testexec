@@ -18,6 +18,8 @@ include ../scripts/utilities.mak
 # Define CROSS_COMPILE as prefix name of compiler if you want cross-builds.
 #
 # Define NO_LIBPERL to disable perl script extension.
+NO_LIBPERL = y
+NO_LIBPYTHON = y
 #
 # Define NO_LIBPYTHON to disable python script extension.
 #
