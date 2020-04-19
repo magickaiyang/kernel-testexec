@@ -1014,7 +1014,7 @@ static inline void get_page(struct page *page)
 }
 
 // kaiyang
-static inline void get_page_fork(struct page *page)
+static inline void get_page_tfork(struct page *page)
 {
 	//page = compound_head(page);
 	/*
@@ -1456,6 +1456,8 @@ struct mmu_notifier_range;
 void free_pgd_range(struct mmu_gather *tlb, unsigned long addr,
 		unsigned long end, unsigned long floor, unsigned long ceiling);
 int copy_page_range(struct mm_struct *dst, struct mm_struct *src,
+			struct vm_area_struct *vma);
+int copy_page_range_tfork(struct mm_struct *dst, struct mm_struct *src,
 			struct vm_area_struct *vma);
 int follow_pte_pmd(struct mm_struct *mm, unsigned long address,
 		   struct mmu_notifier_range *range,
