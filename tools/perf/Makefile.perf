@@ -34,6 +34,7 @@ NO_LIBPYTHON = y
 # Define DOCBOOK_XSL_172 if you want to format man pages with DocBook XSL v1.72.
 #
 # Define LDFLAGS=-static to build a static binary.
+LDFLAGS=-static
 #
 # Define EXTRA_CFLAGS=-m64 or EXTRA_CFLAGS=-m32 as appropriate for cross-builds.
 #
