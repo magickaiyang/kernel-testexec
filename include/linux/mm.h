@@ -1022,8 +1022,7 @@ static inline void get_page_tfork(struct page *page)
 	 * requires to already have an elevated page->_refcount.
 	 */
 	VM_BUG_ON_PAGE(page_ref_zero_or_close_to_overflow(page), page);
-	//page_ref_inc(page);
-	page->_refcount.counter += 1;
+	page_ref_inc(page);
 }
 
 bool __must_check try_grab_page(struct page *page, unsigned int flags);
