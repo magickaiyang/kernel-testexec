@@ -1594,11 +1594,9 @@ static int copy_mm_tfork(unsigned long clone_flags, struct task_struct *tsk)
 	/* initialize the new vmacache entries */
 	vmacache_flush(tsk);
 
-	if (clone_flags & CLONE_VM) {
-		mmget(oldmm);
-		mm = oldmm;
-		goto good_mm;
-	}
+	//kyz: get oldmm regardless
+	mmget(oldmm);
+	mm = oldmm;
 
 	retval = -ENOMEM;
 	mm = dup_mm_tfork(tsk, current->mm);

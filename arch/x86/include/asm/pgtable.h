@@ -398,6 +398,12 @@ static inline pmd_t pmd_mkold(pmd_t pmd)
 	return pmd_clear_flags(pmd, _PAGE_ACCESSED);
 }
 
+//kyz
+static inline pmd_t pmd_mknonpresent(pmd_t pmd)
+{
+	return pmd_clear_flags(pmd, _PAGE_PRESENT);
+}
+
 static inline pmd_t pmd_mkclean(pmd_t pmd)
 {
 	return pmd_clear_flags(pmd, _PAGE_DIRTY);
