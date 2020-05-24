@@ -1198,6 +1198,11 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_nocontext;
 
 	mm->user_ns = get_user_ns(user_ns);
+
+	//kyz
+	mm->parent_mm = NULL;
+	INIT_LIST_HEAD(&(mm->children_mm));
+
 	return mm;
 
 fail_nocontext:
@@ -1604,6 +1609,10 @@ static int copy_mm_tfork(unsigned long clone_flags, struct task_struct *tsk)
 		goto fail_nomem;
 
 good_mm:
+	//kyz: connects the parent and the child's mm_struct
+	list_add(&(mm->children_mm), &(oldmm->children_mm));
+	mm->parent_mm = oldmm;
+
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	return 0;
