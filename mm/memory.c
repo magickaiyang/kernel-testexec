@@ -4419,6 +4419,13 @@ unlock:
 	return 0;
 }
 
+static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *child_mm, unsigned long address) {
+	printk("kyz: parent handle one child\n");
+
+	/* Gets the child's pmd entry  */
+
+}
+
 /*
  * By the time we get here, we already hold the mm semaphore
  *
@@ -4489,6 +4496,7 @@ retry_pud:
 		pmd_t orig_pmd = *vmf.pmd;
 
 		barrier();
+		/*
 		if (unlikely(is_swap_pmd(orig_pmd))) {
 			VM_BUG_ON(thp_migration_supported() &&
 					  !is_pmd_migration_entry(orig_pmd));
@@ -4496,6 +4504,20 @@ retry_pud:
 				pmd_migration_entry_wait(mm, vmf.pmd);
 			return 0;
 		}
+		*/
+
+		//kyz: hijacks the swap handling code
+		if(is_swap_pmd(orig_pmd)) {  //not none and not present
+			//the parent of a tforked process
+			kprintf("kyz: parent of tforked process\n");
+			if(!list_empty(mm->children_mm)) {
+				struct mm_struct *child = NULL;
+				list_for_each_entry (child, &(mm->children_mm), children_mm) {
+					tfork_parent_handle_one_child(vmf.pmd, child, address);
+				}
+			}
+		}
+
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {
 			if (pmd_protnone(orig_pmd) && vma_is_accessible(vma))
 				return do_huge_pmd_numa_page(&vmf, orig_pmd);

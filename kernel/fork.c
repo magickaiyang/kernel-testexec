@@ -1608,7 +1608,6 @@ static int copy_mm_tfork(unsigned long clone_flags, struct task_struct *tsk)
 	if (!mm)
 		goto fail_nomem;
 
-good_mm:
 	//kyz: connects the parent and the child's mm_struct
 	list_add(&(mm->children_mm), &(oldmm->children_mm));
 	mm->parent_mm = oldmm;
