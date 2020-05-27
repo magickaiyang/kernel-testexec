@@ -695,73 +695,6 @@ copy_one_pte_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	pte_t pte = *src_pte;
 	struct page *page;
 
-	/* pte contains position in swap or file, so copy. */
-	if (unlikely(!pte_present(pte))) {
-		swp_entry_t entry = pte_to_swp_entry(pte);
-
-		if (likely(!non_swap_entry(entry))) {
-			if (swap_duplicate(entry) < 0)
-				return entry.val;
-
-			/* make sure dst_mm is on swapoff's mmlist. */
-			if (unlikely(list_empty(&dst_mm->mmlist))) {
-				spin_lock(&mmlist_lock);
-				if (list_empty(&dst_mm->mmlist))
-					list_add(&dst_mm->mmlist,
-							&src_mm->mmlist);
-				spin_unlock(&mmlist_lock);
-			}
-			rss[MM_SWAPENTS]++;
-		} else if (is_migration_entry(entry)) {
-			page = migration_entry_to_page(entry);
-
-			rss[mm_counter(page)]++;
-
-			if (is_write_migration_entry(entry) &&
-					is_cow_mapping(vm_flags)) {
-				/*
-				 * COW mappings require pages in both
-				 * parent and child to be set to read.
-				 */
-				make_migration_entry_read(&entry);
-				pte = swp_entry_to_pte(entry);
-				if (pte_swp_soft_dirty(*src_pte))
-					pte = pte_swp_mksoft_dirty(pte);
-				set_pte_at(src_mm, addr, src_pte, pte);
-			}
-		} else if (is_device_private_entry(entry)) {
-			page = device_private_entry_to_page(entry);
-
-			/*
-			 * Update rss count even for unaddressable pages, as
-			 * they should treated just like normal pages in this
-			 * respect.
-			 *
-			 * We will likely want to have some new rss counters
-			 * for unaddressable pages, at some point. But for now
-			 * keep things as they are.
-			 */
-			get_page(page);
-			rss[mm_counter(page)]++;
-			page_dup_rmap(page, false);
-
-			/*
-			 * We do not preserve soft-dirty information, because so
-			 * far, checkpoint/restore is the only feature that
-			 * requires that. And checkpoint/restore does not work
-			 * when a device driver is involved (you cannot easily
-			 * save and restore device driver state).
-			 */
-			if (is_write_device_private_entry(entry) &&
-			    is_cow_mapping(vm_flags)) {
-				make_device_private_entry_read(&entry);
-				pte = swp_entry_to_pte(entry);
-				set_pte_at(src_mm, addr, src_pte, pte);
-			}
-		}
-		goto out_set_pte;
-	}
-
 	/*
 	 * If it's a COW mapping, write protect it both
 	 * in the parent and the child
@@ -788,7 +721,6 @@ copy_one_pte_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		page = pte_page(pte);
 	}
 
-out_set_pte:
 	set_pte_at(dst_mm, addr, dst_pte, pte);
 	return 0;
 }
@@ -913,11 +845,9 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
 	spinlock_t *src_ptl, *dst_ptl;
-	int progress = 0;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
 
-again:
 	init_rss_vec(rss);
 
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
@@ -931,25 +861,13 @@ again:
 	arch_enter_lazy_mmu_mode();
 
 	do {
-		/*
-		 * We are holding two locks at this point - either of them
-		 * could generate latencies in another task on another CPU.
-		 */
-		if (progress >= 32) {
-			progress = 0;
-			if (need_resched() ||
-			    spin_needbreak(src_ptl) || spin_needbreak(dst_ptl))
-				break;
-		}
 		if (pte_none(*src_pte)) {
-			progress++;
 			continue;
 		}
 		entry.val = copy_one_pte_tfork(dst_mm, src_mm, dst_pte, src_pte,
 							vma, addr, rss);
 		if (entry.val)
-			break;
-		progress += 8;
+			printk("kyz: failed copy_one_pte_tfork call\n");
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	arch_leave_lazy_mmu_mode();
@@ -957,15 +875,7 @@ again:
 	pte_unmap(orig_src_pte);
 	add_mm_rss_vec(dst_mm, rss);
 	pte_unmap_unlock(orig_dst_pte, dst_ptl);
-	cond_resched();
 
-	if (entry.val) {
-		if (add_swap_count_continuation(entry, GFP_KERNEL) < 0)
-			return -ENOMEM;
-		progress = 0;
-	}
-	if (addr != end)
-		goto again;
 	return 0;
 }
 
@@ -4419,11 +4329,27 @@ unlock:
 	return 0;
 }
 
-static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *child_mm, unsigned long address) {
+static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *parent_mm,
+										 struct mm_struct *child_mm, unsigned long address,
+										 struct vm_area_struct *parent_vma) {
+	/* Gets the child's pmd entry  */
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	unsigned long end;
+
 	printk("kyz: parent handle one child\n");
 
-	/* Gets the child's pmd entry  */
+	pgd = pgd_offset(child_mm, address);
+	p4d = p4d_alloc(child_mm, pgd, address);
+	pud = pud_alloc(child_mm, p4d, address);
+	pmd = pmd_alloc(child_mm, pud, address);
 
+	end = pmd_addr_end(address, parent_vma->vm_end);
+	copy_pte_range_tfork(child_mm, parent_mm, pmd, parent_pmd, parent_vma, parent_vma->vm_start, end);
+
+	return 0;
 }
 
 /*
@@ -4509,13 +4435,16 @@ retry_pud:
 		//kyz: hijacks the swap handling code
 		if(is_swap_pmd(orig_pmd)) {  //not none and not present
 			//the parent of a tforked process
-			kprintf("kyz: parent of tforked process\n");
-			if(!list_empty(mm->children_mm)) {
+			printk("kyz: parent of tforked process\n");
+			if(!list_empty(&(mm->children_mm))) {
 				struct mm_struct *child = NULL;
 				list_for_each_entry (child, &(mm->children_mm), children_mm) {
-					tfork_parent_handle_one_child(vmf.pmd, child, address);
+					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, vma);
 				}
 			}
+
+			// mark the parent's pmd entry as present
+			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
 		}
 
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {
