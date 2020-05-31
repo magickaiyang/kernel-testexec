@@ -955,8 +955,13 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 	src_pmd = pmd_offset(src_pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
-		if (is_swap_pmd(*src_pmd) || pmd_trans_huge(*src_pmd)
-			|| pmd_devmap(*src_pmd)) {
+		/*  kyz: this pmd entry could have been processed previously,
+		 *  check for that.*/
+		if(is_swap_pmd(*src_pmd)) {
+			continue;
+		}
+
+		if (pmd_trans_huge(*src_pmd) || pmd_devmap(*src_pmd)) {
 			int err;
 			VM_BUG_ON_VMA(next-addr != HPAGE_PMD_SIZE, vma);
 			err = copy_huge_pmd(dst_mm, src_mm,
@@ -4232,6 +4237,34 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 	return VM_FAULT_FALLBACK;
 }
 
+static void tfork_child(struct vm_fault *vmf) {
+	/* Gets the parent's pmd entry  */
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	struct mm_struct *parent_mm;
+	struct vm_area_struct *child_vma;
+	unsigned long end;
+
+	printk("kyz: child faulting\n");
+
+	child_vma = vmf->vma;
+	parent_mm = vmf->vma->vm_mm->parent_mm;
+	//kyz: locks the parent's mmap_sem
+	down_read(&(parent_mm->mmap_sem));
+
+	pgd = pgd_offset(parent_mm, vmf->address);
+	p4d = p4d_alloc(parent_mm, pgd, vmf->address);
+	pud = pud_alloc(parent_mm, p4d, vmf->address);
+	pmd = pmd_alloc(parent_mm, pud, vmf->address);
+
+	end = pmd_addr_end(vmf->address, child_vma->vm_end);
+	copy_pte_range_tfork(child_vma->vm_mm, parent_mm, vmf->pmd, pmd, child_vma, child_vma->vm_start, end);
+
+	up_read(&(parent_mm->mmap_sem));
+}
+
 /*
  * These routines also need to handle stuff like marking pages dirty
  * and/or accessed for architectures that don't do it in hardware (most
@@ -4288,10 +4321,18 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	if (!vmf->pte) {
-		if (vma_is_anonymous(vmf->vma))
+		//kyz: borrows vma->vm_private_data to identify tforked region, using a magic value
+		if (vmf->vma->vm_mm->parent_mm && (vmf->vma->vm_private_data == (void*)0xaabbccddeeffaabb)) {
+			//kyz: the child by tfork
+			tfork_child(vmf);
+			return 0;
+		}
+		else if (vma_is_anonymous(vmf->vma)) {//kyz: freshly mmaped anonymous region
 			return do_anonymous_page(vmf);
-		else
+		}
+		else {
 			return do_fault(vmf);
+		}
 	}
 
 	if (!pte_present(vmf->orig_pte))
@@ -4341,6 +4382,9 @@ static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *pa
 
 	printk("kyz: parent handle one child\n");
 
+	//kyz: locks the child's mmap_sem
+	down_read(&child_mm->mmap_sem);
+
 	pgd = pgd_offset(child_mm, address);
 	p4d = p4d_alloc(child_mm, pgd, address);
 	pud = pud_alloc(child_mm, p4d, address);
@@ -4348,6 +4392,8 @@ static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *pa
 
 	end = pmd_addr_end(address, parent_vma->vm_end);
 	copy_pte_range_tfork(child_mm, parent_mm, pmd, parent_pmd, parent_vma, parent_vma->vm_start, end);
+
+	up_read(&child_mm->mmap_sem);
 
 	return 0;
 }
@@ -4445,6 +4491,8 @@ retry_pud:
 
 			// mark the parent's pmd entry as present
 			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
+
+			return 0;
 		}
 
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {

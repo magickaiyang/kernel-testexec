@@ -560,6 +560,10 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~(VM_LOCKED | VM_LOCKONFAULT);
 		tmp->vm_next = tmp->vm_prev = NULL;
+
+		/*  kyz: sets magic value to indicate tforked region */
+		tmp->vm_private_data = (void*) 0xaabbccddeeffaabb;
+	
 		file = tmp->vm_file;
 		if (file) {
 			struct inode *inode = file_inode(file);
