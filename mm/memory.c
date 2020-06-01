@@ -848,14 +848,16 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
 
+	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
 	init_rss_vec(rss);
-
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	if (!dst_pte)
 		return -ENOMEM;
 	src_pte = pte_offset_map(src_pmd, addr);
-	src_ptl = pte_lockptr(src_mm, src_pmd);
+	src_ptl = pte_lockptr_dbg(src_mm, src_pmd);
+	printk("before spin_lock_nested, src_pte=%lx, src_ptl = %lx\n", src_pte, src_ptl);
 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+	printk("after spin_lock_nested\n");
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
