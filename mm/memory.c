@@ -4484,15 +4484,16 @@ retry_pud:
 		if(is_swap_pmd(orig_pmd)) {  //not none and not present
 			//the parent of a tforked process
 			printk("kyz: parent of tforked process\n");
+
+			// mark the parent's pmd entry as present
+			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
+
 			if(!list_empty(&(mm->children_mm))) {
 				struct mm_struct *child = NULL;
 				list_for_each_entry (child, &(mm->children_mm), children_mm) {
 					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, vma);
 				}
 			}
-
-			// mark the parent's pmd entry as present
-			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
 
 			return 0;
 		}
