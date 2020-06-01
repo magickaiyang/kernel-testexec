@@ -854,10 +854,8 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 	if (!dst_pte)
 		return -ENOMEM;
 	src_pte = pte_offset_map(src_pmd, addr);
-	src_ptl = pte_lockptr_dbg(src_mm, src_pmd);
-	printk("before spin_lock_nested, src_pte=%lx, src_ptl = %lx\n", src_pte, src_ptl);
+	src_ptl = pte_lockptr(src_mm, src_pmd);
 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
-	printk("after spin_lock_nested\n");
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
@@ -4260,6 +4258,9 @@ static void tfork_child(struct vm_fault *vmf) {
 	p4d = p4d_alloc(parent_mm, pgd, vmf->address);
 	pud = pud_alloc(parent_mm, p4d, vmf->address);
 	pmd = pmd_alloc(parent_mm, pud, vmf->address);
+
+	//marks the parent's pmd entry as present
+	set_pmd_at(parent_mm, vmf->address, pmd, pmd_mkpresent(*pmd));
 
 	end = pmd_addr_end(vmf->address, child_vma->vm_end);
 	copy_pte_range_tfork(child_vma->vm_mm, parent_mm, vmf->pmd, pmd, child_vma, child_vma->vm_start, end);

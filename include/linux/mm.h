@@ -1924,20 +1924,8 @@ static inline spinlock_t *ptlock_ptr(struct page *page)
 {
 	return &page->ptl;
 }
-//kyz
-static inline spinlock_t *ptlock_ptr_dbg(struct page *page)
-{
-	printk("ptlock_ptr: page=%px\n", page);
-	return &page->ptl;
-}
-#endif /* ALLOC_SPLIT_PTLOCKS */
 
-//kyz
-static inline spinlock_t *pte_lockptr_dbg(struct mm_struct *mm, pmd_t *pmd)
-{
-	printk("pte_lockptr: mm=%px, pmd=%px\n", mm, pmd);
-	return ptlock_ptr_dbg(pmd_page(*pmd));
-}
+#endif /* ALLOC_SPLIT_PTLOCKS */
 
 static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
