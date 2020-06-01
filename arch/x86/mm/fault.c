@@ -679,6 +679,8 @@ show_fault_oops(struct pt_regs *regs, unsigned long error_code, unsigned long ad
 		show_ldttss(&gdt, "TR", tr);
 	}
 
+	//kyz
+	pr_alert("\nip = %lx\n", regs->ip);
 	dump_pagetable(address);
 }
 
