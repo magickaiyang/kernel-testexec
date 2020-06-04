@@ -552,6 +552,14 @@ static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
 })
 #endif
 
+//kyz
+#define pte_table_end(addr)						\
+(((addr) + PMD_SIZE) & PMD_MASK)
+
+//kyz
+#define pte_table_start(addr)						\
+(addr & PMD_MASK)
+
 /*
  * When walking page tables, we usually want to skip any p?d_none entries;
  * and any p?d_bad entries - reporting the error before resetting to none.
