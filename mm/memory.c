@@ -4237,10 +4237,33 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 	return VM_FAULT_FALLBACK;
 }
 
-/*  Handles one pte-level page table, covering multiple VMAs (if they exist) */
+/*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist) */
 static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *parent_mm,
 								pmd_t *child_pmd, pmd_t *parent_pmd, struct vm_fault *vmf) {
+	unsigned long table_end, addr, end;
+	struct vm_area_struct *vma;
 
+	//kyz: Starts from the beginning of the range covered by the table
+	addr = pte_table_start(vmf->address);
+	table_end = pte_table_end(vmf->address);
+	printk("tfork_one_pte_table: Covered Range: start=%lx, end=%lx\n", addr, table_end);
+
+	do {
+		vma = find_vma(vmf->vma->vm_mm, addr);
+		if(!vma) {
+			break;  //inexplicable
+		}
+		if(vma->vm_start > table_end) {
+			break;
+		}
+		if(vma->vm_start > addr) {
+			addr = vma->vm_start;
+		}
+		end = pmd_addr_end(addr, vma->vm_end);
+		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
+		copy_pte_range_tfork(child_mm, parent_mm, child_pmd, parent_pmd, vma, addr, end);
+		addr = end;
+	} while(addr<=table_end);
 }
 
 static void tfork_child(struct vm_fault *vmf) {
@@ -4251,7 +4274,6 @@ static void tfork_child(struct vm_fault *vmf) {
 	pmd_t *pmd;
 	struct mm_struct *parent_mm;
 	struct vm_area_struct *child_vma;
-	unsigned long end;
 
 	printk("kyz: child faulting\n");
 
@@ -4269,8 +4291,7 @@ static void tfork_child(struct vm_fault *vmf) {
 	//marks the parent's pmd entry as present
 	set_pmd_at(parent_mm, vmf->address, pmd, pmd_mkpresent(*pmd));
 
-	end = pmd_addr_end(vmf->address, child_vma->vm_end);
-	copy_pte_range_tfork(child_vma->vm_mm, parent_mm, vmf->pmd, pmd, child_vma, child_vma->vm_start, end);
+	tfork_one_pte_table(child_vma->vm_mm, parent_mm, vmf->pmd, pmd, vmf);
 
 	up_read(&(parent_mm->mmap_sem));
 }
@@ -4383,13 +4404,12 @@ unlock:
 
 static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *parent_mm,
 										 struct mm_struct *child_mm, unsigned long address,
-										 struct vm_area_struct *parent_vma) {
+										 struct vm_fault *vmf) {
 	/* Gets the child's pmd entry  */
 	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
-	unsigned long end;
 
 	printk("kyz: parent handle one child\n");
 
@@ -4401,8 +4421,7 @@ static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *pa
 	pud = pud_alloc(child_mm, p4d, address);
 	pmd = pmd_alloc(child_mm, pud, address);
 
-	end = pmd_addr_end(address, parent_vma->vm_end);
-	copy_pte_range_tfork(child_mm, parent_mm, pmd, parent_pmd, parent_vma, parent_vma->vm_start, end);
+	tfork_one_pte_table(child_mm, parent_mm, pmd, parent_pmd, vmf);
 
 	up_read(&child_mm->mmap_sem);
 
@@ -4505,7 +4524,7 @@ retry_pud:
 			if(!list_empty(&(mm->children_mm))) {
 				struct mm_struct *child = NULL;
 				list_for_each_entry (child, &(mm->children_mm), children_mm) {
-					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, vma);
+					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, &vmf);
 				}
 			}
 
