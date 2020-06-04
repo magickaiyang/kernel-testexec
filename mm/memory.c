@@ -4248,6 +4248,12 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 	return VM_FAULT_FALLBACK;
 }
 
+/*  Handles one pte-level page table, covering multiple VMAs (if they exist) */
+static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *parent_mm,
+								pmd_t *child_pmd, pmd_t *parent_pmd, struct vm_fault *vmf) {
+
+}
+
 static void tfork_child(struct vm_fault *vmf) {
 	/* Gets the parent's pmd entry  */
 	pgd_t *pgd;
@@ -4262,6 +4268,7 @@ static void tfork_child(struct vm_fault *vmf) {
 
 	child_vma = vmf->vma;
 	parent_mm = vmf->vma->vm_mm->parent_mm;
+
 	//kyz: locks the parent's mmap_sem
 	down_read(&(parent_mm->mmap_sem));
 
@@ -4306,6 +4313,13 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		 * concurrent faults and from rmap lookups.
 		 */
 		vmf->pte = NULL;
+
+		//kyz: borrows vma->vm_private_data to identify tforked region, using a magic value
+		if (vmf->vma->vm_mm->parent_mm && (vmf->vma->vm_private_data == (void*)0xaabbccddeeffaabb)) {
+			//kyz: the child by tfork
+			tfork_child(vmf);
+			return 0;
+		}
 	} else {
 		/* See comment in pte_alloc_one_map() */
 		if (pmd_devmap_trans_unstable(vmf->pmd))
@@ -4335,13 +4349,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 	}
 
 	if (!vmf->pte) {
-		//kyz: borrows vma->vm_private_data to identify tforked region, using a magic value
-		if (vmf->vma->vm_mm->parent_mm && (vmf->vma->vm_private_data == (void*)0xaabbccddeeffaabb)) {
-			//kyz: the child by tfork
-			tfork_child(vmf);
-			return 0;
-		}
-		else if (vma_is_anonymous(vmf->vma)) {//kyz: freshly mmaped anonymous region
+		if (vma_is_anonymous(vmf->vma)) {//kyz: freshly mmaped anonymous region
 			return do_anonymous_page(vmf);
 		}
 		else {
@@ -4469,6 +4477,11 @@ retry_pud:
 	vmf.pmd = pmd_alloc(mm, vmf.pud, address);
 	if (!vmf.pmd)
 		return VM_FAULT_OOM;
+
+	//kyz
+	if(mm->parent_mm || !list_empty(&(mm->children_mm))) {
+		printk("__handle_mm_fault addr=%lx\n", address);
+	}
 
 	/* Huge pud page fault raced with pmd_alloc? */
 	if (pud_trans_unstable(vmf.pud))
