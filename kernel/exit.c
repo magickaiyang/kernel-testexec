@@ -477,6 +477,12 @@ static void exit_mm(void)
 	BUG_ON(mm != current->active_mm);
 	/* more a memory barrier than a real lock */
 	task_lock(current);
+
+	/*  kyz: If the child of tfork exits, release the parent's mm */
+	if(current->mm->parent_mm) {
+		mmput(current->mm->parent_mm);
+	}
+
 	current->mm = NULL;
 	up_read(&mm->mmap_sem);
 	enter_lazy_tlb(mm, current);
