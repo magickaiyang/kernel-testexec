@@ -429,6 +429,7 @@ assign_new_owner:
 static void exit_mm(void)
 {
 	struct mm_struct *mm = current->mm;
+	struct mm_struct *parent_mm;
 	struct core_state *core_state;
 
 	exit_mm_release(current, mm);
@@ -474,7 +475,9 @@ static void exit_mm(void)
 
 	/*  kyz: If the child of tfork exits, release the parent's mm */
 	if(current->mm->parent_mm) {
-		mmput(current->mm->parent_mm);
+		parent_mm = current->mm->parent_mm;
+		mmput(parent_mm);
+		list_del(&(current->mm->children_mm));
 	}
 
 	current->mm = NULL;
