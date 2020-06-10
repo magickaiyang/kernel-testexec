@@ -847,8 +847,9 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 	spinlock_t *src_ptl, *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
-
+#ifdef CONFIG_DEBUG_VM
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
+#endif
 	init_rss_vec(rss);
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	if (!dst_pte)
@@ -1412,13 +1413,19 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	pmd = pmd_offset(pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
-		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
+		if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
 			if (next - addr != HPAGE_PMD_SIZE)
 				__split_huge_pmd(vma, pmd, addr, false, NULL);
 			else if (zap_huge_pmd(tlb, vma, pmd, addr))
 				goto next;
 			/* fall through */
 		}
+
+		//kyz
+		if(!pmd_none(*pmd) && !pmd_present(*pmd)) {
+			set_pmd_at(vma->vm_mm, addr, pmd, pmd_mkpresent(*pmd));
+		}
+
 		/*
 		 * Here there can be other concurrent MADV_DONTNEED or
 		 * trans huge page faults running, and if the pmd is
@@ -4246,8 +4253,9 @@ static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *pa
 	//kyz: Starts from the beginning of the range covered by the table
 	addr = pte_table_start(vmf->address);
 	table_end = pte_table_end(vmf->address);
+#ifdef CONFIG_DEBUG_VM
 	printk("tfork_one_pte_table: Covered Range: start=%lx, end=%lx\n", addr, table_end);
-
+#endif
 	do {
 		vma = find_vma(vmf->vma->vm_mm, addr);
 		if(!vma) {
@@ -4260,7 +4268,9 @@ static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *pa
 			addr = vma->vm_start;
 		}
 		end = pmd_addr_end(addr, vma->vm_end);
+#ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
+#endif
 		copy_pte_range_tfork(child_mm, parent_mm, child_pmd, parent_pmd, vma, addr, end);
 		addr = end;
 	} while(addr<=table_end);
@@ -4274,9 +4284,9 @@ static void tfork_child(struct vm_fault *vmf) {
 	pmd_t *pmd;
 	struct mm_struct *parent_mm;
 	struct vm_area_struct *child_vma;
-
+#ifdef CONFIG_DEBUG_VM
 	printk("kyz: child faulting\n");
-
+#endif
 	child_vma = vmf->vma;
 	parent_mm = vmf->vma->vm_mm->parent_mm;
 
@@ -4410,9 +4420,9 @@ static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *pa
 	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
-
+#ifdef CONFIG_DEBUG_VM
 	printk("kyz: parent handle one child\n");
-
+#endif
 	//kyz: locks the child's mmap_sem
 	down_read(&child_mm->mmap_sem);
 
@@ -4487,10 +4497,11 @@ retry_pud:
 		return VM_FAULT_OOM;
 
 	//kyz
+#ifdef CONFIG_DEBUG_VM
 	if(mm->parent_mm || !list_empty(&(mm->children_mm))) {
 		printk("__handle_mm_fault addr=%lx\n", address);
 	}
-
+#endif
 	/* Huge pud page fault raced with pmd_alloc? */
 	if (pud_trans_unstable(vmf.pud))
 		goto retry_pud;
@@ -4516,8 +4527,9 @@ retry_pud:
 		//kyz: hijacks the swap handling code
 		if(is_swap_pmd(orig_pmd)) {  //not none and not present
 			//the parent of a tforked process
+#ifdef CONFIG_DEBUG_VM
 			printk("kyz: parent of tforked process\n");
-
+#endif
 			// mark the parent's pmd entry as present
 			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
 
