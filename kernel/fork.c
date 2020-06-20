@@ -502,7 +502,7 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 	struct vm_area_struct *mpnt, *tmp, *prev, **pprev;
 	struct rb_node **rb_link, *rb_parent;
 	struct tfork_control *tcontrol;
-	int retval, tables;
+	int retval;
 	unsigned long charge;
 	LIST_HEAD(uf);
 
@@ -620,14 +620,12 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 
 		mm->map_count++;
 		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
-			tables = calculate_tables(tmp->vm_start, tmp->vm_end);
-			atomic_set(&(tmp->tfork_remaining_tables), tables);
 			/* kyz: If this vma has been set up before */
 			if(mpnt->vm_private_data) {
 				tcontrol = (struct tfork_control*) mpnt->vm_private_data;
 				atomic_inc(&(tcontrol->counter));
 				tmp->vm_private_data = mpnt->vm_private_data;
-				retval = 0;
+				retval = copy_page_range_tfork(mm, oldmm, mpnt, tmp, TFORK_GO_INTO, TFORK_INCREASE_COUNTER);
 			} else {
 				tcontrol = kmalloc(sizeof(struct tfork_control), GFP_KERNEL);
 				atomic_set(&(tcontrol->counter), 2);  //two references
@@ -636,9 +634,12 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 
 				mpnt->vm_private_data = tcontrol;
 				tmp->vm_private_data = tcontrol;
-				atomic_set(&(mpnt->tfork_remaining_tables), tables);
-				retval = copy_page_range_tfork(mm, oldmm, mpnt);
+				retval = copy_page_range_tfork(mm, oldmm, mpnt, tmp, TFORK_INCREASE_COUNTER, TFORK_INCREASE_COUNTER);
 			}
+#ifdef CONFIG_DEBUG_VM
+			printk("dup_mmap_tfork: parent_vma: %d tables remain, child vma: %d tables remain\n",
+				   atomic_read(&(mpnt->tfork_remaining_tables)), atomic_read(&(tmp->tfork_remaining_tables)));
+#endif
 		}
 
 		if (tmp->vm_ops && tmp->vm_ops->open)

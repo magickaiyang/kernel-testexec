@@ -71,6 +71,7 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#include <linux/tfork_control.h>
 
 #include <trace/events/kmem.h>
 
@@ -945,7 +946,7 @@ again:
 
 static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		pud_t *dst_pud, pud_t *src_pud, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end)
+		unsigned long addr, unsigned long end, struct vm_area_struct *dst_vma, int srcvmaflag, int dstvmaflag)
 {
 	pmd_t *src_pmd, *dst_pmd;
 	unsigned long next;
@@ -975,14 +976,28 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		}
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
-		/* if (copy_pte_range_tfork(dst_mm, src_mm, dst_pmd, src_pmd, */
-		/* 				vma, addr, next)) */
-		/* 	return -ENOMEM; */
 
-		//kyz: mark pte-level table as not present in the parent
-		//and doesn't copy pte-level table in the child
-		set_pmd_at(src_mm, addr, src_pmd, pmd_mknonpresent(*src_pmd));
+		if(srcvmaflag & TFORK_DECREASE_COUNTER) {
+			atomic_dec(&(vma->tfork_remaining_tables));
+		} else if(srcvmaflag & TFORK_INCREASE_COUNTER) {
+			atomic_inc(&(vma->tfork_remaining_tables));
+		}
 
+		if(dstvmaflag & TFORK_DECREASE_COUNTER) {
+			atomic_dec(&(dst_vma->tfork_remaining_tables));
+		} else if(dstvmaflag & TFORK_INCREASE_COUNTER) {
+			atomic_inc(&(dst_vma->tfork_remaining_tables));
+		}
+
+		if(srcvmaflag & TFORK_GO_INTO) {
+			if (copy_pte_range_tfork(dst_mm, src_mm, dst_pmd, src_pmd, vma, addr, next)) {
+				return -ENOMEM;
+			}
+		} else {
+			//kyz: marks pte-level table as not present in the parent
+			//and doesn't copy pte-level table in the child
+			set_pmd_at(src_mm, addr, src_pmd, pmd_mknonpresent(*src_pmd));
+		}
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
 }
@@ -1023,7 +1038,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src
 
 static inline int copy_pud_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		p4d_t *dst_p4d, p4d_t *src_p4d, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end)
+		unsigned long addr, unsigned long end, struct vm_area_struct *dst_vma, int srcvmaflag, int dstvmaflag)
 {
 	pud_t *src_pud, *dst_pud;
 	unsigned long next;
@@ -1091,7 +1106,7 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
 
 static inline int copy_p4d_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		pgd_t *dst_pgd, pgd_t *src_pgd, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end)
+		unsigned long addr, unsigned long end, struct vm_area_struct *dst_vma, int srcvmaflag, int dstvmaflag)
 {
 	p4d_t *src_p4d, *dst_p4d;
 	unsigned long next;
@@ -1105,7 +1120,7 @@ static inline int copy_p4d_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		if (p4d_none_or_clear_bad(src_p4d))
 			continue;
 		if (copy_pud_range_tfork(dst_mm, src_mm, dst_p4d, src_p4d,
-						vma, addr, next))
+						vma, addr, next, dst_vma, srcvmaflag, dstvmaflag))
 			return -ENOMEM;
 	} while (dst_p4d++, src_p4d++, addr = next, addr != end);
 	return 0;
@@ -1133,8 +1148,9 @@ static inline int copy_p4d_range(struct mm_struct *dst_mm, struct mm_struct *src
 	return 0;
 }
 
+/*  srcvmaflag/dstvmaflag: 0 for don't count, 1 for increase, 0 for decrease */
 int copy_page_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		struct vm_area_struct *vma)
+		struct vm_area_struct *vma, struct vm_area_struct *dst_vma, int srcvmaflag, int dstvmaflag)
 {
 	pgd_t *src_pgd, *dst_pgd;
 	unsigned long next;
@@ -1189,7 +1205,7 @@ int copy_page_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		if (pgd_none_or_clear_bad(src_pgd))
 			continue;
 		if (unlikely(copy_p4d_range_tfork(dst_mm, src_mm, dst_pgd, src_pgd,
-					    vma, addr, next))) {
+					    vma, addr, next, dst_vma, srcvmaflag, dstvmaflag))) {
 			ret = -ENOMEM;
 			break;
 		}
