@@ -632,6 +632,7 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 				tcontrol = kmalloc(sizeof(struct tfork_control), GFP_KERNEL);
 				atomic_set(&(tcontrol->counter), 2);  //two references
 				tcontrol->p4d = NULL;
+				tcontrol->flag = TFORK_IN_ROOT;
 
 				mpnt->vm_private_data = tcontrol;
 				tmp->vm_private_data = tcontrol;

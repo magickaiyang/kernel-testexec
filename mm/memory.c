@@ -4509,7 +4509,7 @@ retry_pud:
 
 	//kyz
 #ifdef CONFIG_DEBUG_VM
-	if(mm->parent_mm || !list_empty(&(mm->children_mm))) {
+	if(vma->vm_private_data) {
 		printk("__handle_mm_fault addr=%lx\n", address);
 	}
 #endif
@@ -4536,21 +4536,20 @@ retry_pud:
 		*/
 
 		//kyz: hijacks the swap handling code
-		if(is_swap_pmd(orig_pmd)) {  //not none and not present
-			//the parent of a tforked process
+		if(vma->vm_private_data && is_swap_pmd(orig_pmd)) {  //not none and not present
 #ifdef CONFIG_DEBUG_VM
-			printk("kyz: parent of tforked process\n");
+			printk("kyz: root of tforked VMAs\n");
 #endif
-			// mark the parent's pmd entry as present
+			// mark the root's pmd entry as present
 			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
 
-			if(!list_empty(&(mm->children_mm))) {
+/*			if(!list_empty(&(mm->children_mm))) {
 				struct mm_struct *child = NULL;
 				list_for_each_entry (child, &(mm->children_mm), children_mm) {
 					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, &vmf);
 				}
 			}
-
+*/
 			return 0;
 		}
 
