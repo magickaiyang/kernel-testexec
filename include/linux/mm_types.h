@@ -351,7 +351,9 @@ struct vm_area_struct {
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
 					   units */
 	struct file * vm_file;		/* File we map to (can be NULL). */
-	void * vm_private_data;		/* was vm_pte (shared mem) */
+
+	atomic_t tfork_remaining_tables;
+	void * vm_private_data;		/* kyz: commandeered to point to tfork_control struct*/
 
 #ifdef CONFIG_SWAP
 	atomic_long_t swap_readahead_info;
@@ -407,8 +409,6 @@ struct mm_struct {
 		 */
 		atomic_t membarrier_state;
 #endif
-		struct mm_struct *parent_mm;
-		struct list_head children_mm;
 
 		/**
 		 * @mm_users: The number of users including userspace.

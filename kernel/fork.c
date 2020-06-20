@@ -94,6 +94,7 @@
 #include <linux/thread_info.h>
 #include <linux/stackleak.h>
 #include <linux/kasan.h>
+#include <linux/tfork_control.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -479,12 +480,29 @@ void free_task(struct task_struct *tsk)
 EXPORT_SYMBOL(free_task);
 
 #ifdef CONFIG_MMU
+/* kyz: Calculates the number of last level page tables, assuming 4-level on x86-64 and all 4KB pages*/
+static int calculate_tables(unsigned int start, unsigned int end) {
+	int ret = (end - start) / PMD_SIZE;
+	if((end-start) % PMD_SIZE) {
+		ret += 1;
+	}
+	if(ret == 0) {
+		ret = 1;
+	}
+#ifdef CONFIG_DEBUG_VM
+	printk("calculate_tables(): %d tables\n", ret);
+#endif
+
+	return ret;
+}
+
 static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 					struct mm_struct *oldmm)
 {
 	struct vm_area_struct *mpnt, *tmp, *prev, **pprev;
 	struct rb_node **rb_link, *rb_parent;
-	int retval;
+	struct tfork_control *tcontrol;
+	int retval, tables;
 	unsigned long charge;
 	LIST_HEAD(uf);
 
@@ -561,10 +579,6 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~(VM_LOCKED | VM_LOCKONFAULT);
 		tmp->vm_next = tmp->vm_prev = NULL;
-
-		/*  kyz: sets magic value to indicate tforked region */
-		tmp->vm_private_data = (void*) 0xaabbccddeeffaabb;
-	
 		file = tmp->vm_file;
 		if (file) {
 			struct inode *inode = file_inode(file);
@@ -605,8 +619,26 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 		rb_parent = &tmp->vm_rb;
 
 		mm->map_count++;
-		if (!(tmp->vm_flags & VM_WIPEONFORK))
-			retval = copy_page_range_tfork(mm, oldmm, mpnt);
+		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
+			tables = calculate_tables(tmp->vm_start, tmp->vm_end);
+			atomic_set(&(tmp->tfork_remaining_tables), tables);
+			/* kyz: If this vma has been set up before */
+			if(mpnt->vm_private_data) {
+				tcontrol = (struct tfork_control*) mpnt->vm_private_data;
+				atomic_inc(&(tcontrol->counter));
+				tmp->vm_private_data = mpnt->vm_private_data;
+				retval = 0;
+			} else {
+				tcontrol = kmalloc(sizeof(struct tfork_control), GFP_KERNEL);
+				atomic_set(&(tcontrol->counter), 2);  //two references
+				tcontrol->p4d = NULL;
+
+				mpnt->vm_private_data = tcontrol;
+				tmp->vm_private_data = tcontrol;
+				atomic_set(&(mpnt->tfork_remaining_tables), tables);
+				retval = copy_page_range_tfork(mm, oldmm, mpnt);
+			}
+		}
 
 		if (tmp->vm_ops && tmp->vm_ops->open)
 			tmp->vm_ops->open(tmp);
@@ -1203,11 +1235,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_nocontext;
 
 	mm->user_ns = get_user_ns(user_ns);
-
-	//kyz
-	mm->parent_mm = NULL;
-	INIT_LIST_HEAD(&(mm->children_mm));
-
 	return mm;
 
 fail_nocontext:
@@ -1604,19 +1631,18 @@ static int copy_mm_tfork(unsigned long clone_flags, struct task_struct *tsk)
 	/* initialize the new vmacache entries */
 	vmacache_flush(tsk);
 
-	//kyz: get oldmm regardless
-	mmget(oldmm);
-	mm = oldmm;
+	if (clone_flags & CLONE_VM) {
+		mmget(oldmm);
+		mm = oldmm;
+		goto good_mm;
+	}
 
 	retval = -ENOMEM;
 	mm = dup_mm_tfork(tsk, current->mm);
 	if (!mm)
 		goto fail_nomem;
 
-	//kyz: connects the parent and the child's mm_struct
-	list_add(&(mm->children_mm), &(oldmm->children_mm));
-	mm->parent_mm = oldmm;
-
+good_mm:
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	return 0;
