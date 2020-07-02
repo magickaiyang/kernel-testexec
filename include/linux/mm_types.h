@@ -402,8 +402,6 @@ struct mm_struct {
 		 */
 		atomic_t membarrier_state;
 #endif
-		struct mm_struct *parent_mm;
-		struct list_head children_mm;
 
 		/**
 		 * @mm_users: The number of users including userspace.

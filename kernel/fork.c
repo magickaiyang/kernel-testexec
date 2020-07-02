@@ -560,10 +560,6 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~(VM_LOCKED | VM_LOCKONFAULT);
 		tmp->vm_next = tmp->vm_prev = NULL;
-
-		/*  kyz: sets magic value to indicate tforked region */
-		tmp->vm_private_data = (void*) 0xaabbccddeeffaabb;
-	
 		file = tmp->vm_file;
 		if (file) {
 			struct inode *inode = file_inode(file);
@@ -1202,11 +1198,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_nocontext;
 
 	mm->user_ns = get_user_ns(user_ns);
-
-	//kyz
-	mm->parent_mm = NULL;
-	INIT_LIST_HEAD(&(mm->children_mm));
-
 	return mm;
 
 fail_nocontext:
@@ -1603,19 +1594,10 @@ static int copy_mm_tfork(unsigned long clone_flags, struct task_struct *tsk)
 	/* initialize the new vmacache entries */
 	vmacache_flush(tsk);
 
-	//kyz: get oldmm regardless
-	mmget(oldmm);
-	mm = oldmm;
-
 	retval = -ENOMEM;
 	mm = dup_mm_tfork(tsk, current->mm);
 	if (!mm)
 		goto fail_nomem;
-
-	//kyz: connects the parent and the child's mm_struct
-	list_add(&(mm->children_mm), &(oldmm->children_mm));
-	mm->parent_mm = oldmm;
-
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	return 0;
