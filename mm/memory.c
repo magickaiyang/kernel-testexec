@@ -975,14 +975,17 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		}
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
-		/* if (copy_pte_range_tfork(dst_mm, src_mm, dst_pmd, src_pmd, */
-		/* 				vma, addr, next)) */
-		/* 	return -ENOMEM; */
 
-		//kyz: mark pte-level table as not present in the parent
-		//and doesn't copy pte-level table in the child
-		set_pmd_at(src_mm, addr, src_pmd, pmd_mknonpresent(*src_pmd));
-
+		//kyz: does not mess with "special mappings"
+		if(vma->vm_private_data) {
+			if (copy_pte_range_tfork(dst_mm, src_mm, dst_pmd, src_pmd,
+									 vma, addr, next))
+				return -ENOMEM;
+		} else {
+			//kyz: mark pte-level table as not present in the parent
+			//and doesn't copy pte-level table in the child
+			set_pmd_at(src_mm, addr, src_pmd, pmd_mknonpresent(*src_pmd));
+		}
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
 }
