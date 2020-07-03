@@ -2125,6 +2125,10 @@ static inline bool pgtable_pte_page_ctor(struct page *page)
 		return false;
 	__SetPageTable(page);
 	inc_zone_page_state(page, NR_PAGETABLE);
+
+	//kyz
+	page->pt_mm = (struct mm_struct*) ATOMIC64_INIT(0);
+
 	return true;
 }
 

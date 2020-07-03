@@ -947,8 +947,9 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		pud_t *dst_pud, pud_t *src_pud, struct vm_area_struct *vma,
 		unsigned long addr, unsigned long end)
 {
-	pmd_t *src_pmd, *dst_pmd;
+	pmd_t *src_pmd, *dst_pmd, src_pmd_value;
 	unsigned long next;
+	struct page *table_page;
 
 	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
 	if (!dst_pmd)
@@ -956,12 +957,6 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 	src_pmd = pmd_offset(src_pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
-		/*  kyz: this pmd entry could have been processed previously,
-		 *  check for that.*/
-		if(is_swap_pmd(*src_pmd)) {
-			continue;
-		}
-
 		if (pmd_trans_huge(*src_pmd) || pmd_devmap(*src_pmd)) {
 			int err;
 			VM_BUG_ON_VMA(next-addr != HPAGE_PMD_SIZE, vma);
@@ -982,9 +977,15 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 									 vma, addr, next))
 				return -ENOMEM;
 		} else {
-			//kyz: mark pte-level table as not present in the parent
-			//and doesn't copy pte-level table in the child
-			set_pmd_at(src_mm, addr, src_pmd, pmd_mknonpresent(*src_pmd));
+			src_pmd_value = *src_pmd;
+			//kyz: sets write-protect to the pmd entry if the vma is writable
+			if(vma->vm_flags & VM_WRITE) {
+				src_pmd_value = pmd_wrprotect(src_pmd_value);
+				set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
+			}
+			table_page = pmd_page(*src_pmd);
+			atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
+			set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 		}
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
