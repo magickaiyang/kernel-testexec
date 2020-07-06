@@ -774,6 +774,11 @@ static inline int pmd_present(pmd_t pmd)
 	return pmd_flags(pmd) & (_PAGE_PRESENT | _PAGE_PROTNONE | _PAGE_PSE);
 }
 
+//kyz
+static inline int pmd_iswrite(pmd_t pmd) {
+	return pmd_flags(pmd) & (_PAGE_RW);
+}
+
 #ifdef CONFIG_NUMA_BALANCING
 /*
  * These work without NUMA balancing but the kernel does not care. See the

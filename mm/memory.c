@@ -81,7 +81,7 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-
+void tfork_page_remove_rmap(struct page*, bool, pmd_t*);
 #include "internal.h"
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
@@ -215,6 +215,11 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 {
 	pgtable_t token = pmd_pgtable(*pmd);
 	pmd_clear(pmd);
+	//kyz
+	if(!atomic64_dec_and_test((atomic64_t*) &(token->pt_mm))) {
+		return;  //pte table is still in use
+	}
+
 	pte_free_tlb(tlb, token, addr);
 	mm_dec_nr_ptes(tlb->mm);
 }
@@ -687,7 +692,7 @@ out:
 #endif
 
 static inline unsigned long
-copy_one_pte_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+copy_one_pte_tfork(struct mm_struct *dst_mm,
 		pte_t *dst_pte, pte_t *src_pte, struct vm_area_struct *vma,
 		unsigned long addr, int *rss)
 {
@@ -698,9 +703,9 @@ copy_one_pte_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	/*
 	 * If it's a COW mapping, write protect it both
 	 * in the parent and the child
+	 * kyz: only protect in the child (the faulting process)
 	 */
 	if (is_cow_mapping(vm_flags) && pte_write(pte)) {
-		ptep_set_wrprotect(src_mm, addr, src_pte);
 		pte = pte_wrprotect(pte);
 	}
 
@@ -838,13 +843,13 @@ out_set_pte:
 	return 0;
 }
 
-static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		   pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
+static int copy_pte_range_tfork(struct mm_struct *dst_mm,
+		   pmd_t *dst_pmd, struct vm_area_struct *vma,
 		   unsigned long addr, unsigned long end)
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
-	spinlock_t *src_ptl, *dst_ptl;
+	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
 #ifdef CONFIG_DEBUG_VM
@@ -854,9 +859,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	if (!dst_pte)
 		return -ENOMEM;
-	src_pte = pte_offset_map(src_pmd, addr);
-	src_ptl = pte_lockptr(src_mm, src_pmd);
-	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+	src_pte = pte_offset_map(dst_pmd, addr);
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
@@ -865,14 +868,13 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_
 		if (pte_none(*src_pte)) {
 			continue;
 		}
-		entry.val = copy_one_pte_tfork(dst_mm, src_mm, dst_pte, src_pte,
+		entry.val = copy_one_pte_tfork(dst_mm, dst_pte, src_pte,
 							vma, addr, rss);
 		if (entry.val)
 			printk("kyz: failed copy_one_pte_tfork call\n");
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	arch_leave_lazy_mmu_mode();
-	spin_unlock(src_ptl);
 	pte_unmap(orig_src_pte);
 	add_mm_rss_vec(dst_mm, rss);
 	pte_unmap_unlock(orig_dst_pte, dst_ptl);
@@ -973,8 +975,7 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 
 		//kyz: does not mess with "special mappings"
 		if(vma->vm_private_data) {
-			if (copy_pte_range_tfork(dst_mm, src_mm, dst_pmd, src_pmd,
-									 vma, addr, next))
+			if (copy_pte_range_tfork(dst_mm, dst_pmd, vma, addr, next))
 				return -ENOMEM;
 		} else {
 			src_pmd_value = *src_pmd;
@@ -1329,7 +1330,7 @@ again:
 					mark_page_accessed(page);
 			}
 			rss[mm_counter(page)]--;
-			page_remove_rmap(page, false);
+			tfork_page_remove_rmap(page, false, pmd);
 			if (unlikely(page_mapcount(page) < 0))
 				print_bad_pte(vma, addr, ptent, page);
 			if (unlikely(__tlb_remove_page(tlb, page))) {
@@ -1357,7 +1358,7 @@ again:
 
 			pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 			rss[mm_counter(page)]--;
-			page_remove_rmap(page, false);
+			tfork_page_remove_rmap(page, false, pmd);
 			put_page(page);
 			continue;
 		}
@@ -1424,12 +1425,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				goto next;
 			/* fall through */
 		}
-
-		//kyz
-		if(!pmd_none(*pmd) && !pmd_present(*pmd)) {
-			set_pmd_at(vma->vm_mm, addr, pmd, pmd_mkpresent(*pmd));
-		}
-
 		/*
 		 * Here there can be other concurrent MADV_DONTNEED or
 		 * trans huge page faults running, and if the pmd is
@@ -2857,7 +2852,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			 * mapcount is visible. So transitively, TLBs to
 			 * old page will be flushed before it can be reused.
 			 */
-			page_remove_rmap(old_page, false);
+			tfork_page_remove_rmap(old_page, false, vmf->pmd);
 		}
 
 		/* Free the old page.. */
@@ -4260,8 +4255,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist) */
-static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *parent_mm,
-								pmd_t *child_pmd, pmd_t *parent_pmd, struct vm_fault *vmf) {
+static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_fault *vmf) {
 	unsigned long table_end, addr, end;
 	struct vm_area_struct *vma;
 
@@ -4272,7 +4266,7 @@ static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *pa
 	printk("tfork_one_pte_table: Covered Range: start=%lx, end=%lx\n", addr, table_end);
 #endif
 	do {
-		vma = find_vma(vmf->vma->vm_mm, addr);
+		vma = find_vma(mm, addr);
 		if(!vma) {
 			break;  //inexplicable
 		}
@@ -4286,39 +4280,9 @@ static void tfork_one_pte_table(struct mm_struct *child_mm, struct mm_struct *pa
 #ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
 #endif
-		copy_pte_range_tfork(child_mm, parent_mm, child_pmd, parent_pmd, vma, addr, end);
+		copy_pte_range_tfork(mm, dst_pmd, vma, addr, end);
 		addr = end;
 	} while(addr<=table_end);
-}
-
-static void tfork_child(struct vm_fault *vmf) {
-	/* Gets the parent's pmd entry  */
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
-	struct mm_struct *parent_mm;
-	struct vm_area_struct *child_vma;
-#ifdef CONFIG_DEBUG_VM
-	printk("kyz: child faulting\n");
-#endif
-	child_vma = vmf->vma;
-	parent_mm = vmf->vma->vm_mm->parent_mm;
-
-	//kyz: locks the parent's mmap_sem
-	down_read(&(parent_mm->mmap_sem));
-
-	pgd = pgd_offset(parent_mm, vmf->address);
-	p4d = p4d_alloc(parent_mm, pgd, vmf->address);
-	pud = pud_alloc(parent_mm, p4d, vmf->address);
-	pmd = pmd_alloc(parent_mm, pud, vmf->address);
-
-	//marks the parent's pmd entry as present
-	set_pmd_at(parent_mm, vmf->address, pmd, pmd_mkpresent(*pmd));
-
-	tfork_one_pte_table(child_vma->vm_mm, parent_mm, vmf->pmd, pmd, vmf);
-
-	up_read(&(parent_mm->mmap_sem));
 }
 
 /*
@@ -4348,13 +4312,6 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		 * concurrent faults and from rmap lookups.
 		 */
 		vmf->pte = NULL;
-
-		//kyz: borrows vma->vm_private_data to identify tforked region, using a magic value
-		if (vmf->vma->vm_mm->parent_mm && (vmf->vma->vm_private_data == (void*)0xaabbccddeeffaabb)) {
-			//kyz: the child by tfork
-			tfork_child(vmf);
-			return 0;
-		}
 	} else {
 		/* See comment in pte_alloc_one_map() */
 		if (pmd_devmap_trans_unstable(vmf->pmd))
@@ -4427,29 +4384,15 @@ unlock:
 	return 0;
 }
 
-static int tfork_parent_handle_one_child(pmd_t *parent_pmd, struct mm_struct *parent_mm,
-										 struct mm_struct *child_mm, unsigned long address,
-										 struct vm_fault *vmf) {
-	/* Gets the child's pmd entry  */
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
-#ifdef CONFIG_DEBUG_VM
-	printk("kyz: parent handle one child\n");
-#endif
-	//kyz: locks the child's mmap_sem
-	down_read(&child_mm->mmap_sem);
+int dereference_pte_table(pmd_t* pmd) {
+	struct page *table_page;
 
-	pgd = pgd_offset(child_mm, address);
-	p4d = p4d_alloc(child_mm, pgd, address);
-	pud = pud_alloc(child_mm, p4d, address);
-	pmd = pmd_alloc(child_mm, pud, address);
-
-	tfork_one_pte_table(child_mm, parent_mm, pmd, parent_pmd, vmf);
-
-	up_read(&child_mm->mmap_sem);
-
+	table_page = pmd_page(*pmd);
+	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
+		pgtable_pte_page_dtor(table_page);
+		__free_page(table_page);
+		return 1;
+	}
 	return 0;
 }
 
@@ -4511,12 +4454,6 @@ retry_pud:
 	if (!vmf.pmd)
 		return VM_FAULT_OOM;
 
-	//kyz
-#ifdef CONFIG_DEBUG_VM
-	if(mm->parent_mm || !list_empty(&(mm->children_mm))) {
-		printk("__handle_mm_fault addr=%lx\n", address);
-	}
-#endif
 	/* Huge pud page fault raced with pmd_alloc? */
 	if (pud_trans_unstable(vmf.pud))
 		goto retry_pud;
@@ -4539,23 +4476,14 @@ retry_pud:
 		}
 		*/
 
-		//kyz: hijacks the swap handling code
-		if(is_swap_pmd(orig_pmd)) {  //not none and not present
-			//the parent of a tforked process
+		//kyz: checks if the pmd entry prohibits writes
+		if(!pmd_iswrite(orig_pmd)) {
 #ifdef CONFIG_DEBUG_VM
-			printk("kyz: parent of tforked process\n");
+			printk("__handle_mm_fault: tforked process, addr=%lx\n", address);
 #endif
-			// mark the parent's pmd entry as present
-			set_pmd_at(mm, address, vmf.pmd, pmd_mkpresent(*vmf.pmd));
-
-			if(!list_empty(&(mm->children_mm))) {
-				struct mm_struct *child = NULL;
-				list_for_each_entry (child, &(mm->children_mm), children_mm) {
-					tfork_parent_handle_one_child(vmf.pmd, mm, child, address, &vmf);
-				}
-			}
-
-			return 0;
+			tfork_one_pte_table(mm, vmf.pmd, &vmf);
+			dereference_pte_table(vmf.pmd);
+			return handle_pte_fault(&vmf);
 		}
 
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {
