@@ -98,7 +98,7 @@ static void __tlb_remove_table_free(struct mmu_table_batch *batch)
 	int i;
 
 	for (i = 0; i < batch->nr; i++)
-		__tlb_remove_table(batch->tables[i]);
+		__tlb_remove_table(batch->tables[i]);  //kyz: put_page() behind
 
 	free_page((unsigned long)batch);
 }
