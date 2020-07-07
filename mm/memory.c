@@ -425,6 +425,36 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
+int dereference_pte_table(pmd_t* pmd) {
+	struct page *table_page;
+
+	table_page = pmd_page(*pmd);
+	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
+		pgtable_pte_page_dtor(table_page);
+		__free_page(table_page);
+		return 1;
+	}
+	return 0;
+}
+
+int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
+{
+	spinlock_t *ptl;
+	pgtable_t new = pte_alloc_one(mm);
+	if (!new)
+		return -ENOMEM;
+	smp_wmb(); /* Could be smp_wmb__xxx(before|after)_spin_lock */
+
+	ptl = pmd_lock(mm, pmd);
+	mm_inc_nr_ptes(mm);
+
+	dereference_pte_table(pmd);  //kyz: dereferences the old pte table
+
+	pmd_populate(mm, pmd, new);
+	spin_unlock(ptl);
+	return 0;
+}
+
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
 	spinlock_t *ptl;
@@ -856,7 +886,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
 #endif
 	init_rss_vec(rss);
-	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+	dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	if (!dst_pte)
 		return -ENOMEM;
 	src_pte = pte_offset_map(dst_pmd, addr);
@@ -970,6 +1000,11 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 				continue;
 			/* fall through */
 		}
+		//kyz
+		if(!pmd_iswrite(*src_pmd)) {
+			continue;
+		}
+
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
 
@@ -4384,18 +4419,6 @@ unlock:
 	return 0;
 }
 
-int dereference_pte_table(pmd_t* pmd) {
-	struct page *table_page;
-
-	table_page = pmd_page(*pmd);
-	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
-		pgtable_pte_page_dtor(table_page);
-		__free_page(table_page);
-		return 1;
-	}
-	return 0;
-}
-
 /*
  * By the time we get here, we already hold the mm semaphore
  *
@@ -4476,16 +4499,6 @@ retry_pud:
 		}
 		*/
 
-		//kyz: checks if the pmd entry prohibits writes
-		if(!pmd_iswrite(orig_pmd)) {
-#ifdef CONFIG_DEBUG_VM
-			printk("__handle_mm_fault: tforked process, addr=%lx\n", address);
-#endif
-			tfork_one_pte_table(mm, vmf.pmd, &vmf);
-			dereference_pte_table(vmf.pmd);
-			return handle_pte_fault(&vmf);
-		}
-
 		if (pmd_trans_huge(orig_pmd) || pmd_devmap(orig_pmd)) {
 			if (pmd_protnone(orig_pmd) && vma_is_accessible(vma))
 				return do_huge_pmd_numa_page(&vmf, orig_pmd);
@@ -4498,6 +4511,14 @@ retry_pud:
 				huge_pmd_set_accessed(&vmf, orig_pmd);
 				return 0;
 			}
+		}
+
+		//kyz: checks if the pmd entry prohibits writes
+		if((!pmd_none(orig_pmd)) && (!pmd_iswrite(orig_pmd)) && (vma->vm_flags & VM_WRITE)) {
+#ifdef CONFIG_DEBUG_VM
+			printk("__handle_mm_fault: tforked process, addr=%lx\n", address);
+#endif
+			tfork_one_pte_table(mm, vmf.pmd, &vmf);
 		}
 	}
 
