@@ -1008,21 +1008,15 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
 
-		//kyz: does not mess with "special mappings"
-		if(vma->vm_private_data) {
-			if (copy_pte_range_tfork(dst_mm, dst_pmd, vma, addr, next))
-				return -ENOMEM;
-		} else {
-			src_pmd_value = *src_pmd;
-			//kyz: sets write-protect to the pmd entry if the vma is writable
-			if(vma->vm_flags & VM_WRITE) {
-				src_pmd_value = pmd_wrprotect(src_pmd_value);
-				set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
-			}
-			table_page = pmd_page(*src_pmd);
-			atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
-			set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
+		src_pmd_value = *src_pmd;
+		//kyz: sets write-protect to the pmd entry if the vma is writable
+		if(vma->vm_flags & VM_WRITE) {
+			src_pmd_value = pmd_wrprotect(src_pmd_value);
+			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
+		table_page = pmd_page(*src_pmd);
+		atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
+		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
 }
