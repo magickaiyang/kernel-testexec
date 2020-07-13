@@ -425,10 +425,10 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int dereference_pte_table(pmd_t* pmd) {
+int dereference_pte_table(pmd_t pmd) {
 	struct page *table_page;
 
-	table_page = pmd_page(*pmd);
+	table_page = pmd_page(pmd);
 	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
 		pgtable_pte_page_dtor(table_page);
 		__free_page(table_page);
@@ -447,11 +447,12 @@ int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 
 	ptl = pmd_lock(mm, pmd);
 	mm_inc_nr_ptes(mm);
-
-	dereference_pte_table(pmd);  //kyz: dereferences the old pte table
-
+	//kyz: won't check if the pte table already exists
 	pmd_populate(mm, pmd, new);
+	new = NULL;
 	spin_unlock(ptl);
+	if (new)
+		pte_free(mm, new);
 	return 0;
 }
 
@@ -879,6 +880,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
+	pmd_t orig_pmd_val;
 	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -886,10 +888,17 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
 #endif
 	init_rss_vec(rss);
-	dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+
+	if(!pmd_none(*dst_pmd)) {
+		orig_pmd_val = *dst_pmd;
+	} else {
+		orig_pmd_val = native_make_pmd(0);
+	}
+
+	src_pte = pte_offset_map(dst_pmd, addr); //src_pte points to the old table
+	dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
 	if (!dst_pte)
 		return -ENOMEM;
-	src_pte = pte_offset_map(dst_pmd, addr);
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
@@ -908,6 +917,9 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	pte_unmap(orig_src_pte);
 	add_mm_rss_vec(dst_mm, rss);
 	pte_unmap_unlock(orig_dst_pte, dst_ptl);
+	if(!pmd_none(orig_pmd_val)) {
+		dereference_pte_table(orig_pmd_val);
+	}
 
 	return 0;
 }
