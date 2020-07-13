@@ -2155,7 +2155,7 @@ static inline void pgtable_pte_page_dtor(struct page *page)
 
 #define pte_alloc(mm, pmd) (unlikely(pmd_none(*(pmd))) && __pte_alloc(mm, pmd))
 
-#define tfork_pte_alloc(mm, pmd) (unlikely(pmd_none(*(pmd))) && __tfork_pte_alloc(mm, pmd))
+#define tfork_pte_alloc(mm, pmd) (__tfork_pte_alloc(mm, pmd))
 
 #define pte_alloc_map(mm, pmd, address)			\
 	(pte_alloc(mm, pmd) ? NULL : pte_offset_map(pmd, address))

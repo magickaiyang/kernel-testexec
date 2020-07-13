@@ -182,6 +182,7 @@ extern void sync_global_pgds(unsigned long start, unsigned long end);
 
 /* x86-64 always has all page tables mapped. */
 #define pte_offset_map(dir, address) pte_offset_kernel((dir), (address))
+#define tfork_pte_offset_map(pmd_val, address) tfork_pte_offset_kernel((pmd_val), (address))
 #define pte_unmap(pte) ((void)(pte))/* NOP */
 
 /*

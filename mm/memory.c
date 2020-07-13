@@ -875,12 +875,11 @@ out_set_pte:
 }
 
 static int copy_pte_range_tfork(struct mm_struct *dst_mm,
-		   pmd_t *dst_pmd, struct vm_area_struct *vma,
+		   pmd_t *dst_pmd, pmd_t src_pmd_val, struct vm_area_struct *vma,
 		   unsigned long addr, unsigned long end)
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
-	pmd_t orig_pmd_val;
 	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
@@ -889,14 +888,12 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 #endif
 	init_rss_vec(rss);
 
-	if(!pmd_none(*dst_pmd)) {
-		orig_pmd_val = *dst_pmd;
+	src_pte = tfork_pte_offset_map(src_pmd_val, addr); //src_pte points to the old table
+	if(!pmd_iswrite(*dst_pmd)) {
+		dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
 	} else {
-		orig_pmd_val = native_make_pmd(0);
+		dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	}
-
-	src_pte = pte_offset_map(dst_pmd, addr); //src_pte points to the old table
-	dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
 	if (!dst_pte)
 		return -ENOMEM;
 	orig_src_pte = src_pte;
@@ -917,9 +914,6 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	pte_unmap(orig_src_pte);
 	add_mm_rss_vec(dst_mm, rss);
 	pte_unmap_unlock(orig_dst_pte, dst_ptl);
-	if(!pmd_none(orig_pmd_val)) {
-		dereference_pte_table(orig_pmd_val);
-	}
 
 	return 0;
 }
@@ -4299,6 +4293,13 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_fault *vmf) {
 	unsigned long table_end, addr, end;
 	struct vm_area_struct *vma;
+	pmd_t orig_pmd_val;
+
+	if(!pmd_none(*dst_pmd)) {
+		orig_pmd_val = *dst_pmd;
+	} else {
+		BUG();
+	}
 
 	//kyz: Starts from the beginning of the range covered by the table
 	addr = pte_table_start(vmf->address);
@@ -4321,9 +4322,13 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_
 #ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
 #endif
-		copy_pte_range_tfork(mm, dst_pmd, vma, addr, end);
+		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
 		addr = end;
 	} while(addr<=table_end);
+
+	if(!pmd_none(orig_pmd_val)) {
+		dereference_pte_table(orig_pmd_val);
+	}
 }
 
 /*

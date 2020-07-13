@@ -847,6 +847,11 @@ static inline unsigned long pte_index(unsigned long address)
 	return (address >> PAGE_SHIFT) & (PTRS_PER_PTE - 1);
 }
 
+static inline pte_t *tfork_pte_offset_kernel(pmd_t pmd_val, unsigned long address)
+{
+	return (pte_t *)pmd_page_vaddr(pmd_val) + pte_index(address);
+}
+
 static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 {
 	return (pte_t *)pmd_page_vaddr(*pmd) + pte_index(address);
@@ -854,7 +859,7 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_flags(pmd) & ~_PAGE_USER) != _KERNPG_TABLE;
+	return ((pmd_flags(pmd) & ~_PAGE_USER) != _KERNPG_TABLE) && ((pmd_flags(pmd) & ~_PAGE_USER) != ((_KERNPG_TABLE)&(~_PAGE_RW)));
 }
 
 static inline unsigned long pages_to_mb(unsigned long npg)
