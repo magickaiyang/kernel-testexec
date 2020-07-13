@@ -169,15 +169,15 @@ static void unaccount_page_cache_page(struct address_space *mapping,
 		cleancache_invalidate_page(mapping, page);
 
 	VM_BUG_ON_PAGE(PageTail(page), page);
-	VM_BUG_ON_PAGE(page_mapped(page), page);
+	//VM_BUG_ON_PAGE(page_mapped(page), page);
 	if (!IS_ENABLED(CONFIG_DEBUG_VM) && unlikely(page_mapped(page))) {
 		int mapcount;
 
-		pr_alert("BUG: Bad page cache in process %s  pfn:%05lx\n",
-			 current->comm, page_to_pfn(page));
-		dump_page(page, "still mapped when deleted");
-		dump_stack();
-		add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
+		/* pr_alert("BUG: Bad page cache in process %s  pfn:%05lx\n", */
+		/* 	 current->comm, page_to_pfn(page)); */
+		/* dump_page(page, "still mapped when deleted"); */
+		/* dump_stack(); */
+		/* add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE); */
 
 		mapcount = page_mapcount(page);
 		if (mapping_exiting(mapping) &&
