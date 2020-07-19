@@ -81,7 +81,7 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-void tfork_page_remove_rmap(struct page*, bool, pmd_t*);
+void tfork_page_remove_rmap(struct page*, bool, pmd_t*, long);
 #include "internal.h"
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
@@ -1365,7 +1365,7 @@ again:
 					mark_page_accessed(page);
 			}
 			rss[mm_counter(page)]--;
-			tfork_page_remove_rmap(page, false, pmd);
+			tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
 			if (unlikely(page_mapcount(page) < 0))
 				print_bad_pte(vma, addr, ptent, page);
 			if (unlikely(__tlb_remove_page(tlb, page))) {
@@ -1393,7 +1393,7 @@ again:
 
 			pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 			rss[mm_counter(page)]--;
-			tfork_page_remove_rmap(page, false, pmd);
+			tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
 			put_page(page);
 			continue;
 		}
@@ -2887,7 +2887,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			 * mapcount is visible. So transitively, TLBs to
 			 * old page will be flushed before it can be reused.
 			 */
-			tfork_page_remove_rmap(old_page, false, vmf->pmd);
+			tfork_page_remove_rmap(old_page, false, vmf->pmd, 0);
 		}
 
 		/* Free the old page.. */

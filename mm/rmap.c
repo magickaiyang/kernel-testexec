@@ -1369,7 +1369,7 @@ void page_remove_rmap(struct page *page, bool compound)
 	 */
 }
 
-void tfork_page_remove_rmap(struct page *page, bool compound, pmd_t *pmd)
+void tfork_page_remove_rmap(struct page *page, bool compound, pmd_t *pmd, long threshold)
 {
 	long pte_table_ref_counter;
 	struct page *table_page;
@@ -1387,9 +1387,9 @@ void tfork_page_remove_rmap(struct page *page, bool compound, pmd_t *pmd)
 	//kyz: the page is about to become free
 	table_page = pmd_page(*pmd);
 	pte_table_ref_counter = atomic64_read((atomic64_t*) &(table_page->pt_mm));
-	if(pte_table_ref_counter > 0) {
-		atomic_add(pte_table_ref_counter, &page->_mapcount);
-		atomic_add(pte_table_ref_counter, &page->_refcount);
+	if(pte_table_ref_counter > threshold) {
+		atomic_add(pte_table_ref_counter - threshold, &page->_mapcount);
+		atomic_add(pte_table_ref_counter - threshold, &page->_refcount);
 		return;
 	}
 
