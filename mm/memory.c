@@ -82,6 +82,7 @@
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
 void tfork_page_remove_rmap(struct page*, bool, pmd_t*, long);
+static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long);
 #include "internal.h"
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
@@ -1310,7 +1311,7 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long addr, unsigned long end,
-				struct zap_details *details)
+				struct zap_details *details, bool invalidate_pmd)
 {
 	struct mm_struct *mm = tlb->mm;
 	int force_flush = 0;
@@ -1349,8 +1350,10 @@ again:
 				    details->check_mapping != page_rmapping(page))
 					continue;
 			}
-			ptent = ptep_get_and_clear_full(mm, addr, pte,
-							tlb->fullmm);
+			if(!invalidate_pmd) { //kyz: see some point later
+				ptent = ptep_get_and_clear_full(mm, addr, pte,
+											tlb->fullmm);
+			}
 			tlb_remove_tlb_entry(tlb, pte, addr);
 			if (unlikely(!page))
 				continue;
@@ -1415,6 +1418,11 @@ again:
 		pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 	} while (pte++, addr += PAGE_SIZE, addr != end);
 
+	if(invalidate_pmd) {
+		//kyz: instead of clearing the pte entry, we invalidate the pmd entry above us
+		set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
+	}
+
 	add_mm_rss_vec(mm, rss);
 	arch_leave_lazy_mmu_mode();
 
@@ -1447,8 +1455,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	pmd_t *pmd;
-	unsigned long next;
+	pmd_t *pmd, pmd_val;
+	struct page *table_page;
+	unsigned long next, table_start, table_end;
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -1469,7 +1478,22 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		 */
 		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
 			goto next;
-		next = zap_pte_range(tlb, vma, pmd, addr, next, details);
+		//kyz: copy if the pte table is shared and VMA does not cover fully the 2MB region
+		pmd_val = *pmd;
+		table_page = pmd_page(pmd_val);
+		if(atomic64_read((atomic64_t*) &(table_page->pt_mm)) > 1) {
+			table_start = pte_table_start(addr);
+			table_end = pte_table_end(addr);
+			if(table_start < vma->vm_start || table_end > vma->vm_end) {
+				tfork_one_pte_table(vma->vm_mm, pmd, addr);
+				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+			} else {
+				//kyz: shared and fully covered by the VMA, preserve the pte entries
+				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+			}
+		} else {
+			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+		}
 next:
 		cond_resched();
 	} while (pmd++, addr = next, addr != end);
@@ -4279,8 +4303,8 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist) */
-static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_fault *vmf) {
-	unsigned long table_end, addr, end;
+static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr) {
+	unsigned long table_end, end;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
 
@@ -4291,8 +4315,8 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_
 	}
 
 	//kyz: Starts from the beginning of the range covered by the table
-	addr = pte_table_start(vmf->address);
-	table_end = pte_table_end(vmf->address);
+	table_end = pte_table_end(addr);
+	addr = pte_table_start(addr);
 #ifdef CONFIG_DEBUG_VM
 	printk("tfork_one_pte_table: Covered Range: start=%lx, end=%lx\n", addr, table_end);
 #endif
@@ -4313,7 +4337,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, struct vm_
 #endif
 		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
 		addr = end;
-	} while(addr<=table_end);
+	} while(addr<table_end);
 
 	if(!pmd_none(orig_pmd_val)) {
 		dereference_pte_table(orig_pmd_val);
@@ -4518,7 +4542,7 @@ retry_pud:
 #ifdef CONFIG_DEBUG_VM
 			printk("__handle_mm_fault: tforked process, addr=%lx\n", address);
 #endif
-			tfork_one_pte_table(mm, vmf.pmd, &vmf);
+			tfork_one_pte_table(mm, vmf.pmd, vmf.address);
 		}
 	}
 
