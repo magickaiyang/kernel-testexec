@@ -726,7 +726,7 @@ out:
 static inline unsigned long
 copy_one_pte_tfork(struct mm_struct *dst_mm,
 		pte_t *dst_pte, pte_t *src_pte, struct vm_area_struct *vma,
-		unsigned long addr, int *rss)
+		unsigned long addr, int *rss, bool charge_page)
 {
 	unsigned long vm_flags = vma->vm_flags;
 	pte_t pte = *src_pte;
@@ -749,13 +749,15 @@ copy_one_pte_tfork(struct mm_struct *dst_mm,
 		pte = pte_mkclean(pte);
 	pte = pte_mkold(pte);
 
-	page = vm_normal_page(vma, addr, pte);
-	if (page) {
-		get_page_tfork(page);
-		page_dup_rmap(page, false);
-		rss[mm_counter(page)]++;
-	} else if (pte_devmap(pte)) {
-		page = pte_page(pte);
+	if(charge_page) {
+		page = vm_normal_page(vma, addr, pte);
+		if (page) {
+			get_page_tfork(page);
+			page_dup_rmap(page, false);
+			rss[mm_counter(page)]++;
+		} else if (pte_devmap(pte)) {
+			page = pte_page(pte);
+		}
 	}
 
 	set_pte_at(dst_mm, addr, dst_pte, pte);
@@ -884,6 +886,8 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
+	struct page *table_page;
+	bool charge_page_counter;
 #ifdef CONFIG_DEBUG_VM
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
 #endif
@@ -897,6 +901,16 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	}
 	if (!dst_pte)
 		return -ENOMEM;
+
+	table_page = pmd_page(src_pmd_val);
+	if(atomic64_read((atomic64_t*) &(table_page->pt_mm)) == 1) {
+		//kyz: prevents over-counting when we're the only user of table
+		//already counted in tfork_page_remove_rmap()
+		charge_page_counter = false;
+	} else {
+		charge_page_counter = true;
+	}
+
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
@@ -906,7 +920,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 			continue;
 		}
 		entry.val = copy_one_pte_tfork(dst_mm, dst_pte, src_pte,
-							vma, addr, rss);
+							vma, addr, rss, charge_page_counter);
 		if (entry.val)
 			printk("kyz: failed copy_one_pte_tfork call\n");
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
@@ -1485,9 +1499,15 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			table_start = pte_table_start(addr);
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
+#ifdef CONFIG_DEBUG_VM
+				printk("%s: table_start=%lx, table_end=%lx, copy then zap\n", __func__, table_start, table_end);
+#endif
 				tfork_one_pte_table(vma->vm_mm, pmd, addr);
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 			} else {
+#ifdef CONFIG_DEBUG_VM
+				printk("%s: table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, table_start, table_end);
+#endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
 			}
@@ -2911,7 +2931,10 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			 * mapcount is visible. So transitively, TLBs to
 			 * old page will be flushed before it can be reused.
 			 */
-			tfork_page_remove_rmap(old_page, false, vmf->pmd, 0);
+
+			//kyz: we must be using a dedicated pte table, so struct page counters have
+			//already been incremented in copy_pte_range_tfork
+			page_remove_rmap(old_page, false);
 		}
 
 		/* Free the old page.. */

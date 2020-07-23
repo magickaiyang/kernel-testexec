@@ -1379,8 +1379,9 @@ void tfork_page_remove_rmap(struct page *page, bool compound, pmd_t *pmd, long t
 	table_page = pmd_page(*pmd);
 	pte_table_ref_counter = atomic64_read((atomic64_t*) &(table_page->pt_mm));
 	if(pte_table_ref_counter > threshold) {
-		atomic_add(pte_table_ref_counter - threshold, &page->_mapcount);
-		atomic_add(pte_table_ref_counter - threshold, &page->_refcount);
+		//kyz: too frequently called to use printk
+		atomic_add(1, &page->_mapcount);
+		atomic_add(1, &page->_refcount); //only add the bare minimum
 		return;
 	}
 
