@@ -1021,10 +1021,6 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 				continue;
 			/* fall through */
 		}
-		//kyz
-		if(!pmd_iswrite(*src_pmd)) {
-			continue;
-		}
 
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
