@@ -1360,7 +1360,7 @@ again:
 				    details->check_mapping != page_rmapping(page))
 					continue;
 			}
-			if(!invalidate_pmd) { //kyz: see some point later
+			if(!invalidate_pmd) { //kyz: see the notes below
 				ptent = ptep_get_and_clear_full(mm, addr, pte,
 											tlb->fullmm);
 			}
@@ -1378,7 +1378,22 @@ again:
 					mark_page_accessed(page);
 			}
 			rss[mm_counter(page)]--;
-			tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
+
+			/* If not invalidate_pmd, then
+			**
+			** 1. The pte table is fully within one VMA
+			** 2. The pte table is shared (therefore we haven't touched the page ref counters)
+			** 3. We are not the last user of the shared table (checked in zap_pmd_range), because
+			**    if we were, we must decrement the counters (a special case for the last user).
+			**
+			** Therefore, no need to decrease then increase page ref counters in tfork_page_remove_rmap
+			 */
+			if(!invalidate_pmd) {
+				tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
+			} else {
+				continue;  //__tlb_remove_page below will decrement the page's _refcount. Not what we want!
+			}
+
 			if (unlikely(page_mapcount(page) < 0))
 				print_bad_pte(vma, addr, ptent, page);
 			if (unlikely(__tlb_remove_page(tlb, page))) {
