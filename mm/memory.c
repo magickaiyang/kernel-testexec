@@ -218,6 +218,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pmd_clear(pmd);
 	//kyz
 	if(!atomic64_dec_and_test((atomic64_t*) &(token->pt_mm))) {
+		//the pte table was not accounted for in this process, so no mm_dec_nr_ptes
 		return;  //pte table is still in use
 	}
 
@@ -426,13 +427,14 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int dereference_pte_table(pmd_t pmd) {
+int dereference_pte_table(pmd_t pmd, struct mm_struct *mm) {
 	struct page *table_page;
 
 	table_page = pmd_page(pmd);
 	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
 		pgtable_pte_page_dtor(table_page);
 		__free_page(table_page);
+		//mm_dec_nr_ptes(mm);
 		return 1;
 	}
 	return 0;
@@ -442,6 +444,9 @@ int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
 	spinlock_t *ptl;
 	pgtable_t new = pte_alloc_one(mm);
+#ifdef CONFIG_DEBUG_VM
+	printk("__tfork_pte_alloc\n");
+#endif
 	if (!new)
 		return -ENOMEM;
 	smp_wmb(); /* Could be smp_wmb__xxx(before|after)_spin_lock */
@@ -1032,7 +1037,9 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
-		atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
+		//atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
+		//TODO
+		atomic64_set((atomic64_t*) &(table_page->pt_mm), 2);
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
@@ -4374,7 +4381,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	} while(addr<table_end);
 
 	if(!pmd_none(orig_pmd_val)) {
-		dereference_pte_table(orig_pmd_val);
+		dereference_pte_table(orig_pmd_val, mm);
 	}
 }
 

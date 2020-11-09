@@ -806,7 +806,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 static void check_mm(struct mm_struct *mm)
 {
-/*	int i;
+	int i;
 
 	BUILD_BUG_ON_MSG(ARRAY_SIZE(resident_page_types) != NR_MM_COUNTERS,
 			 "Please make sure 'struct resident_page_types[]' is updated as well");
@@ -820,9 +820,9 @@ static void check_mm(struct mm_struct *mm)
 	}
 
 	if (mm_pgtables_bytes(mm))
-		pr_alert("BUG: non-zero pgtables_bytes on freeing mm: %ld\n",
-				mm_pgtables_bytes(mm));
-*/
+		pr_alert("BUG: non-zero pgtables_bytes on freeing mm: %p val: %ld\n",
+				mm, mm_pgtables_bytes(mm));
+
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	VM_BUG_ON_MM(mm->pmd_huge_pte, mm);
 #endif
@@ -2947,7 +2947,7 @@ static __latent_entropy struct task_struct *copy_process(
 	 * between here and cgroup_post_fork() if an organisation operation is in
 	 * progress.
 	 */
-	retval = cgroup_can_fork(p, args);
+	retval = cgroup_can_fork(p);
 	if (retval)
 		goto bad_fork_put_pidfd;
 
@@ -3054,7 +3054,7 @@ static __latent_entropy struct task_struct *copy_process(
 	write_unlock_irq(&tasklist_lock);
 
 	proc_fork_connector(p);
-	cgroup_post_fork(p, args);
+	cgroup_post_fork(p);
 	perf_event_fork(p);
 
 	trace_task_newtask(p, clone_flags);
@@ -3065,7 +3065,7 @@ static __latent_entropy struct task_struct *copy_process(
 bad_fork_cancel_cgroup:
 	spin_unlock(&current->sighand->siglock);
 	write_unlock_irq(&tasklist_lock);
-	cgroup_cancel_fork(p, args);
+	cgroup_cancel_fork(p);
 bad_fork_put_pidfd:
 	if (clone_flags & CLONE_PIDFD) {
 		fput(pidfile);
