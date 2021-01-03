@@ -3612,6 +3612,9 @@ setpte:
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, vmf->address, vmf->pte);
+
+	// kyz : one more VMA is using the pte table
+	atomic64_inc(&pmd_page(*vmf->pmd)->pte_table_refcount);
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 	return ret;

@@ -1975,7 +1975,7 @@ static inline bool pgtable_pte_page_ctor(struct page *page)
 	inc_zone_page_state(page, NR_PAGETABLE);
 
 	//kyz
-	atomic64_set((atomic64_t*) &(page->pt_mm), 1);
+	atomic64_set(&(page->pte_table_refcount), 0);
 
 	return true;
 }

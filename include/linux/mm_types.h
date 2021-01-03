@@ -148,7 +148,7 @@ struct page {
 			union {
 				struct mm_struct *pt_mm; /* x86 pgds only */
 				atomic_t pt_frag_refcount; /* powerpc */
-				atomic_t pte_table_refcount;
+				atomic64_t pte_table_refcount;
 			};
 #if ALLOC_SPLIT_PTLOCKS
 			spinlock_t *ptl;
