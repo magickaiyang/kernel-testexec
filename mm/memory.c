@@ -434,7 +434,7 @@ int dereference_pte_table(pmd_t pmd, struct mm_struct *mm) {
 	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
 		pgtable_pte_page_dtor(table_page);
 		__free_page(table_page);
-		//mm_dec_nr_ptes(mm);
+		mm_dec_nr_ptes(mm);
 		return 1;
 	}
 	return 0;
@@ -1490,6 +1490,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	pmd_t *pmd, pmd_val;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
+	struct vm_area_struct *prev_vma;
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -1513,8 +1514,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		//kyz: copy if the pte table is shared and VMA does not cover fully the 2MB region
 		pmd_val = *pmd;
 		table_page = pmd_page(pmd_val);
+		table_start = pte_table_start(addr);
+
 		if(atomic64_read((atomic64_t*) &(table_page->pt_mm)) > 1) {
-			table_start = pte_table_start(addr);
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
 #ifdef CONFIG_DEBUG_VM
@@ -1530,6 +1532,16 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
 			}
 		} else {
+			//kyz: also consider pushing the addr forward, freeing pages tied up by the shared table when we
+			//are the last VMA of this table standing.
+			prev_vma = vma->vm_prev;  //the chain of VMAs is sorted according to their address
+			if(!prev_vma) {
+				//addr = table_start;
+			} else {
+				if(prev_vma->vm_end <= table_start) {
+					addr = table_start;
+				}
+			}
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 		}
 next:
@@ -4381,6 +4393,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	} while(addr<table_end);
 
 	if(!pmd_none(orig_pmd_val)) {
+		// TODO: change to per VMA counting
 		dereference_pte_table(orig_pmd_val, mm);
 	}
 }
