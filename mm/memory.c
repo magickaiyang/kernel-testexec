@@ -731,7 +731,7 @@ out:
 static inline unsigned long
 copy_one_pte_tfork(struct mm_struct *dst_mm,
 		pte_t *dst_pte, pte_t *src_pte, struct vm_area_struct *vma,
-		unsigned long addr, int *rss, bool charge_page)
+		unsigned long addr, int *rss)
 {
 	unsigned long vm_flags = vma->vm_flags;
 	pte_t pte = *src_pte;
@@ -754,15 +754,13 @@ copy_one_pte_tfork(struct mm_struct *dst_mm,
 		pte = pte_mkclean(pte);
 	pte = pte_mkold(pte);
 
-	if(charge_page) {
-		page = vm_normal_page(vma, addr, pte);
-		if (page) {
-			get_page_tfork(page);
-			page_dup_rmap(page, false);
-			rss[mm_counter(page)]++;
-		} else if (pte_devmap(pte)) {
-			page = pte_page(pte);
-		}
+	page = vm_normal_page(vma, addr, pte);
+	if (page) {
+		get_page_tfork(page); //kyz :same as get_page()
+		page_dup_rmap(page, false);
+		rss[mm_counter(page)]++;
+	} else if (pte_devmap(pte)) {
+		page = pte_page(pte);
 	}
 
 	set_pte_at(dst_mm, addr, dst_pte, pte);
@@ -891,8 +889,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
-	struct page *table_page;
-	bool charge_page_counter;
+	struct page *dst_pte_page;
 #ifdef CONFIG_DEBUG_VM
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx\n", addr, end);
 #endif
@@ -907,14 +904,8 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	if (!dst_pte)
 		return -ENOMEM;
 
-	table_page = pmd_page(src_pmd_val);
-	if(atomic64_read((atomic64_t*) &(table_page->pt_mm)) == 1) {
-		//kyz: prevents over-counting when we're the only user of table
-		//already counted in tfork_page_remove_rmap()
-		charge_page_counter = false;
-	} else {
-		charge_page_counter = true;
-	}
+	dst_pte_page = pmd_page(*dst_pmd);
+	atomic64_inc(&(dst_pte_page->pte_table_refcount)); //kyz :associates the VMA with the new table
 
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
@@ -925,7 +916,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 			continue;
 		}
 		entry.val = copy_one_pte_tfork(dst_mm, dst_pte, src_pte,
-							vma, addr, rss, charge_page_counter);
+							vma, addr, rss);
 		if (entry.val)
 			printk("kyz: failed copy_one_pte_tfork call\n");
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
