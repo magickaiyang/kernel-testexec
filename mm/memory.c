@@ -1037,9 +1037,7 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
-		//atomic64_inc((atomic64_t*) &(table_page->pt_mm));  //increments the counter
-		//TODO
-		atomic64_set((atomic64_t*) &(table_page->pt_mm), 2);
+		atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;

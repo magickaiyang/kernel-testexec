@@ -600,8 +600,11 @@ static __latent_entropy int dup_mmap_tfork(struct mm_struct *mm,
 		rb_parent = &tmp->vm_rb;
 
 		mm->map_count++;
-		if (!(tmp->vm_flags & VM_WIPEONFORK))
+		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
+			mpnt->is_on_demand = true;
+			tmp->is_on_demand = true;
 			retval = copy_page_range_tfork(mm, oldmm, mpnt);
+		}
 
 		if (tmp->vm_ops && tmp->vm_ops->open)
 			tmp->vm_ops->open(tmp);
