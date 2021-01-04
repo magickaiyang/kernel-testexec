@@ -84,7 +84,6 @@
 void tfork_page_remove_rmap(struct page*, bool, pmd_t*, long);
 static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long);
 #include "internal.h"
-
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -427,11 +426,21 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int dereference_pte_table(pmd_t pmd, struct mm_struct *mm) {
+int dereference_pte_table(pmd_t *pmd, struct mm_struct *mm, unsigned long addr) {
 	struct page *table_page;
+	unsigned long table_end, table_start;
 
-	table_page = pmd_page(pmd);
-	if(atomic64_dec_and_test((atomic64_t*) &(table_page->pt_mm))) {
+	table_page = pmd_page(*pmd);
+
+#ifdef CONFIG_DEBUG_VM
+	printk("dereference_pte_table\n");
+#endif
+
+	if(atomic64_dec_and_test(&(table_page->pte_table_refcount))) {
+		table_end = pte_table_end(addr);
+		table_start = pte_table_start(addr);
+		zap_pte_range(tlb, );
+
 		pgtable_pte_page_dtor(table_page);
 		__free_page(table_page);
 		mm_dec_nr_ptes(mm);
