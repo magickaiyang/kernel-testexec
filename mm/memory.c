@@ -81,7 +81,6 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-void tfork_page_remove_rmap(struct page*, bool, pmd_t*, long);
 static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long);
 #include "internal.h"
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
@@ -214,9 +213,12 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token = pmd_pgtable(*pmd);
+	long int counter;
 	pmd_clear(pmd);
 	//kyz
-	if(!atomic64_dec_and_test((atomic64_t*) &(token->pt_mm))) {
+	counter = atomic64_read(&(token->pte_table_refcount));
+	if(counter > 0) {
+		//the pte table can only be shared in this case
 		//the pte table was not accounted for in this process, so no mm_dec_nr_ptes
 		return;  //pte table is still in use
 	}
@@ -426,7 +428,7 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int dereference_pte_table(pmd_t *pmd, struct mm_struct *mm, unsigned long addr) {
+int dereference_pte_table(pmd_t *pmd, bool free_table, struct mm_struct *mm) {
 	struct page *table_page;
 	unsigned long table_end, table_start;
 
@@ -437,13 +439,15 @@ int dereference_pte_table(pmd_t *pmd, struct mm_struct *mm, unsigned long addr) 
 #endif
 
 	if(atomic64_dec_and_test(&(table_page->pte_table_refcount))) {
-		table_end = pte_table_end(addr);
+		/*table_end = pte_table_end(addr);
 		table_start = pte_table_start(addr);
 		zap_pte_range(tlb, );
-
-		pgtable_pte_page_dtor(table_page);
-		__free_page(table_page);
-		mm_dec_nr_ptes(mm);
+*/
+		if(free_table) {
+			pgtable_pte_page_dtor(table_page);
+			__free_page(table_page);
+			mm_dec_nr_ptes(mm);
+		}
 		return 1;
 	}
 	return 0;
@@ -1385,16 +1389,11 @@ again:
 			rss[mm_counter(page)]--;
 
 			/* If not invalidate_pmd, then
-			**
 			** 1. The pte table is fully within one VMA
 			** 2. The pte table is shared (therefore we haven't touched the page ref counters)
-			** 3. We are not the last user of the shared table (checked in zap_pmd_range), because
-			**    if we were, we must decrement the counters (a special case for the last user).
-			**
-			** Therefore, no need to decrease then increase page ref counters in tfork_page_remove_rmap
 			 */
 			if(!invalidate_pmd) {
-				tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
+				page_remove_rmap(page, false); //the current pte table is end of life
 			} else {
 				continue;  //__tlb_remove_page below will decrement the page's _refcount. Not what we want!
 			}
@@ -1426,7 +1425,7 @@ again:
 
 			pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 			rss[mm_counter(page)]--;
-			tfork_page_remove_rmap(page, false, pmd, 1); //the current pte table is end of life
+			page_remove_rmap(page, false);
 			put_page(page);
 			continue;
 		}
@@ -4393,10 +4392,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		addr = end;
 	} while(addr<table_end);
 
-	if(!pmd_none(orig_pmd_val)) {
-		// TODO: change to per VMA counting
-		dereference_pte_table(orig_pmd_val, mm);
-	}
+	dereference_pte_table(dst_pmd, true, mm);
 }
 
 /*

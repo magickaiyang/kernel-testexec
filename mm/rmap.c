@@ -1360,40 +1360,6 @@ void page_remove_rmap(struct page *page, bool compound)
 	 */
 }
 
-void tfork_page_remove_rmap(struct page *page, bool compound, pmd_t *pmd, long threshold)
-{
-	long pte_table_ref_counter;
-	struct page *table_page;
-
-	if (!PageAnon(page))
-		return page_remove_file_rmap(page, compound);
-
-	if (compound)
-		return page_remove_anon_compound_rmap(page);
-
-	/* page still mapped by someone else? */
-	if (!atomic_add_negative(-1, &page->_mapcount))
-		return;
-
-	//kyz: the page is about to become free
-	table_page = pmd_page(*pmd);
-	pte_table_ref_counter = atomic64_read((atomic64_t*) &(table_page->pt_mm));
-	if(pte_table_ref_counter > threshold) {
-		//kyz: too frequently called to use printk
-		atomic_add(1, &page->_mapcount);
-		atomic_add(1, &page->_refcount); //only add the bare minimum
-		return;
-	}
-
-	__dec_node_page_state(page, NR_ANON_MAPPED);
-
-	if (unlikely(PageMlocked(page)))
-		clear_page_mlock(page);
-
-	if (PageTransCompound(page))
-		deferred_split_huge_page(compound_head(page));
-}
-
 /*
  * @arg: enum ttu_flags will be passed to this argument
  */
