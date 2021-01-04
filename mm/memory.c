@@ -1446,12 +1446,12 @@ again:
 			print_bad_pte(vma, addr, ptent, NULL);
 		pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 	} while (pte++, addr += PAGE_SIZE, addr != end);
-
+/* done in zap_pmd_range
 	if(invalidate_pmd) {
 		//kyz: instead of clearing the pte entry, we invalidate the pmd entry above us
 		set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
 	}
-
+*/
 	add_mm_rss_vec(mm, rss);
 	arch_leave_lazy_mmu_mode();
 
@@ -1484,10 +1484,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	pmd_t *pmd, pmd_val;
+	pmd_t *pmd;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
-	struct vm_area_struct *prev_vma;
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -1509,11 +1508,10 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
 			goto next;
 		//kyz: copy if the pte table is shared and VMA does not cover fully the 2MB region
-		pmd_val = *pmd;
-		table_page = pmd_page(pmd_val);
+		table_page = pmd_page(*pmd);
 		table_start = pte_table_start(addr);
 
-		if(atomic64_read((atomic64_t*) &(table_page->pt_mm)) > 1) {
+		if(!pmd_iswrite(*pmd)) {//shared pte table
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
 #ifdef CONFIG_DEBUG_VM
@@ -1521,24 +1519,17 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 #endif
 				tfork_one_pte_table(vma->vm_mm, pmd, addr);
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+				dereference_pte_table(pmd, false, vma->vm_mm);
 			} else {
 #ifdef CONFIG_DEBUG_VM
 				printk("%s: table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, table_start, table_end);
 #endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+				dereference_pte_table(pmd, false, vma->vm_mm);
+				set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
 			}
 		} else {
-			//kyz: also consider pushing the addr forward, freeing pages tied up by the shared table when we
-			//are the last VMA of this table standing.
-			prev_vma = vma->vm_prev;  //the chain of VMAs is sorted according to their address
-			if(!prev_vma) {
-				//addr = table_start;
-			} else {
-				if(prev_vma->vm_end <= table_start) {
-					addr = table_start;
-				}
-			}
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 		}
 next:
