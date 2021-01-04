@@ -82,6 +82,8 @@
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
 static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long);
+static inline void init_rss_vec(int *rss);
+static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss);
 #include "internal.h"
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
@@ -428,10 +430,25 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int dereference_pte_table(pmd_t *pmd, bool free_table, struct mm_struct *mm) {
-	struct page *table_page;
-	unsigned long table_end, table_start;
+// kyz : frees every page described by the pte table
+void zap_one_pte_table(pmd_t *pmd, unsigned long addr, struct mm_struct *mm) {
+   int rss[NR_MM_COUNTERS];
+   pte_t *pte;
+   unsigned long end;
 
+   init_rss_vec(rss);
+   addr = pte_table_start(addr);
+   end = pte_table_end(addr);
+   pte = pte_offset_map(pmd, addr);
+   do {
+
+   } while (pte++, addr += PAGE_SIZE, addr != end);
+
+   add_mm_rss_vec(mm, rss);
+}
+
+int dereference_pte_table(pmd_t *pmd, bool free_table, struct mm_struct *mm, unsigned long addr) {
+	struct page *table_page;
 	table_page = pmd_page(*pmd);
 
 #ifdef CONFIG_DEBUG_VM
@@ -439,10 +456,8 @@ int dereference_pte_table(pmd_t *pmd, bool free_table, struct mm_struct *mm) {
 #endif
 
 	if(atomic64_dec_and_test(&(table_page->pte_table_refcount))) {
-		/*table_end = pte_table_end(addr);
-		table_start = pte_table_start(addr);
-		zap_pte_range(tlb, );
-*/
+		zap_one_pte_table(pmd, addr, mm);
+
 		if(free_table) {
 			pgtable_pte_page_dtor(table_page);
 			__free_page(table_page);
@@ -1519,14 +1534,14 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 #endif
 				tfork_one_pte_table(vma->vm_mm, pmd, addr);
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-				dereference_pte_table(pmd, false, vma->vm_mm);
+				dereference_pte_table(pmd, false, vma->vm_mm, addr);
 			} else {
 #ifdef CONFIG_DEBUG_VM
 				printk("%s: table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, table_start, table_end);
 #endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-				dereference_pte_table(pmd, false, vma->vm_mm);
+				dereference_pte_table(pmd, false, vma->vm_mm, addr);
 				set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
 			}
 		} else {
@@ -4348,7 +4363,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 
 /*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist) */
 static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr) {
-	unsigned long table_end, end;
+	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
 
@@ -4359,6 +4374,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	}
 
 	//kyz: Starts from the beginning of the range covered by the table
+	orig_addr = addr;
 	table_end = pte_table_end(addr);
 	addr = pte_table_start(addr);
 #ifdef CONFIG_DEBUG_VM
@@ -4383,7 +4399,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		addr = end;
 	} while(addr<table_end);
 
-	dereference_pte_table(dst_pmd, true, mm);
+	dereference_pte_table(dst_pmd, true, mm, orig_addr);
 }
 
 /*
