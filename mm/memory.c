@@ -441,7 +441,22 @@ void zap_one_pte_table(pmd_t *pmd, unsigned long addr, struct mm_struct *mm) {
    end = pte_table_end(addr);
    pte = pte_offset_map(pmd, addr);
    do {
+	   pte_t ptent = *pte;
+	   if (pte_none(ptent))
+		   continue;
 
+	   if (need_resched())
+		   break;
+
+	   if (pte_present(ptent)) {
+		   struct page *page;
+		   page = vm_normal_page(NULL, addr, ptent); //kyz : vma is not important
+		   if (unlikely(!page))
+			   continue;
+		   rss[mm_counter(page)]--;
+		   page_remove_rmap(page, false);
+		   put_page(page);
+	   }
    } while (pte++, addr += PAGE_SIZE, addr != end);
 
    add_mm_rss_vec(mm, rss);
