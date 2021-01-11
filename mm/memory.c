@@ -431,7 +431,7 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 }
 
 // kyz : frees every page described by the pte table
-void zap_one_pte_table(pmd_t *pmd, unsigned long addr, struct mm_struct *mm) {
+void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) {
    int rss[NR_MM_COUNTERS];
    pte_t *pte;
    unsigned long end;
@@ -439,7 +439,7 @@ void zap_one_pte_table(pmd_t *pmd, unsigned long addr, struct mm_struct *mm) {
    init_rss_vec(rss);
    addr = pte_table_start(addr);
    end = pte_table_end(addr);
-   pte = pte_offset_map(pmd, addr);
+   pte = tfork_pte_offset_map(pmd_val, addr);
    do {
 	   pte_t ptent = *pte;
 	   if (pte_none(ptent))
@@ -466,12 +466,12 @@ void zap_one_pte_table(pmd_t *pmd, unsigned long addr, struct mm_struct *mm) {
    add_mm_rss_vec(mm, rss);
 }
 
-int dereference_pte_table(pmd_t *pmd, bool free_table, struct mm_struct *mm, unsigned long addr) {
+int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
 	struct page *table_page;
-	table_page = pmd_page(*pmd);
+	table_page = pmd_page(pmd_val);
 
 	if(atomic64_dec_and_test(&(table_page->pte_table_refcount))) {
-		zap_one_pte_table(pmd, addr, mm);
+		zap_one_pte_table(pmd_val, addr, mm);
 
 #ifdef CONFIG_DEBUG_VM
 		printk("dereference_pte_table: addr=%lx, free_table=%d, (after) pte_table_count=%lld\n", addr, free_table, atomic64_read(&(table_page->pte_table_refcount)));
@@ -942,6 +942,9 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 
 	src_pte = tfork_pte_offset_map(src_pmd_val, addr); //src_pte points to the old table
 	if(!pmd_iswrite(*dst_pmd)) {
+#ifdef CONFIG_DEBUG_VM
+		printk("copy_pte_range_tfork: allocating a new table\n");
+#endif
 		dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
 	} else {
 		dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
@@ -952,7 +955,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	dst_pte_page = pmd_page(*dst_pmd);
 	atomic64_inc(&(dst_pte_page->pte_table_refcount)); //kyz :associates the VMA with the new table
 #ifdef CONFIG_DEBUG_VM
-	printk("copy_pte_range_tfork: addr = %lx, end = %lx, pte_table_counter (after)=%lld\n", addr, end, atomic64_read(&(dst_pte_page->pte_table_refcount)));
+	printk("copy_pte_range_tfork: addr = %lx, end = %lx, new pte table counter (after)=%lld\n", addr, end, atomic64_read(&(dst_pte_page->pte_table_refcount)));
 #endif
 
 	orig_src_pte = src_pte;
@@ -1076,7 +1079,18 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
-		atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
+		if(vma->pte_table_counter_pending) { // kyz : the old VMA hasn't been counted in the PTE table, count it now
+			atomic64_add(2, &(table_page->pte_table_refcount));
+			vma->pte_table_counter_pending = false;
+#ifdef CONFIG_DEBUG_VM
+			printk("copy_pmd_range: addr=%lx, pte table counter (after counting old&new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
+		} else {
+			atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
+#ifdef CONFIG_DEBUG_VM
+			printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
+		}
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
@@ -1554,14 +1568,14 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 #endif
 				tfork_one_pte_table(vma->vm_mm, pmd, addr);
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-				dereference_pte_table(pmd, false, vma->vm_mm, addr);
+				dereference_pte_table(*pmd, false, vma->vm_mm, addr);
 			} else {
 #ifdef CONFIG_DEBUG_VM
 				printk("%s: table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, table_start, table_end);
 #endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-				dereference_pte_table(pmd, false, vma->vm_mm, addr);
+				dereference_pte_table(*pmd, false, vma->vm_mm, addr);
 				set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
 			}
 		} else {
@@ -3632,12 +3646,23 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	lru_cache_add_active_or_unevictable(page, vma);
 setpte:
 	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
-
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, vmf->address, vmf->pte);
 
 	// kyz : one more VMA is using the pte table
-	atomic64_inc(&pmd_page(*vmf->pmd)->pte_table_refcount);
+	if(vmf->vma->pte_table_counter_pending) {
+		atomic64_inc(&pmd_page(*vmf->pmd)->pte_table_refcount);
+		vmf->vma->pte_table_counter_pending = false;
+#ifdef CONFIG_DEBUG_VM
+		char process_name[TASK_COMM_LEN];
+		get_task_comm(process_name, vmf->vma->vm_mm->owner);
+		if (strncmp(process_name, "tfork_test", TASK_COMM_LEN) == 0) {
+			printk("do_anonymous_page: start=%lx, end=%lx, pte table ref count inc'ed\n",
+				   vmf->vma->vm_start, vmf->vma->vm_end);
+		}
+#endif
+	}
+
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 	return ret;
@@ -4386,6 +4411,7 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
+	struct page *orig_pte_page;
 
 	if(!pmd_none(*dst_pmd)) {
 		orig_pmd_val = *dst_pmd;
@@ -4398,7 +4424,8 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	table_end = pte_table_end(addr);
 	addr = pte_table_start(addr);
 #ifdef CONFIG_DEBUG_VM
-	printk("tfork_one_pte_table: Covered Range: start=%lx, end=%lx\n", addr, table_end);
+	orig_pte_page = pmd_page(orig_pmd_val);
+	printk("tfork_one_pte_table: shared pte table counter=%lld, Covered Range: start=%lx, end=%lx\n", atomic64_read(&(orig_pte_page->pte_table_refcount)), addr, table_end);
 #endif
 	do {
 		vma = find_vma(mm, addr);
@@ -4417,9 +4444,8 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 #endif
 		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
 		addr = end;
+		dereference_pte_table(orig_pmd_val, true, mm, orig_addr);
 	} while(addr<table_end);
-
-	dereference_pte_table(dst_pmd, true, mm, orig_addr);
 }
 
 /*
