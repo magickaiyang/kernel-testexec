@@ -445,9 +445,6 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
 	   if (pte_none(ptent))
 		   continue;
 
-	   if (need_resched())
-		   break;
-
 	   if (pte_present(ptent)) {
 		   struct page *page;
 		   page = vm_normal_page(NULL, addr, ptent); //kyz : vma is not important
@@ -471,12 +468,11 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 	table_page = pmd_page(pmd_val);
 
 	if(atomic64_dec_and_test(&(table_page->pte_table_refcount))) {
-		zap_one_pte_table(pmd_val, addr, mm);
-
 #ifdef CONFIG_DEBUG_VM
 		printk("dereference_pte_table: addr=%lx, free_table=%d, pte table reached end of life\n", addr, free_table);
 #endif
 
+		zap_one_pte_table(pmd_val, addr, mm);
 		if(free_table) {
 			pgtable_pte_page_dtor(table_page);
 			__free_page(table_page);
@@ -4439,10 +4435,15 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		if(vma->vm_start > table_end) {
 			break;
 		}
+		end = pmd_addr_end(addr, vma->vm_end);
+		if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
+			!vma->anon_vma) { //kyz : stays consistent with the standard fork (never copy tables for these VMAs)
+			addr = end;
+			continue;
+		}
 		if(vma->vm_start > addr) {
 			addr = vma->vm_start;
 		}
-		end = pmd_addr_end(addr, vma->vm_end);
 #ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
 #endif
