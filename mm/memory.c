@@ -474,7 +474,7 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 		zap_one_pte_table(pmd_val, addr, mm);
 
 #ifdef CONFIG_DEBUG_VM
-		printk("dereference_pte_table: addr=%lx, free_table=%d, (after) pte_table_count=%lld\n", addr, free_table, atomic64_read(&(table_page->pte_table_refcount)));
+		printk("dereference_pte_table: addr=%lx, free_table=%d, pte table reached end of life\n", addr, free_table);
 #endif
 
 		if(free_table) {
@@ -483,6 +483,10 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 			mm_dec_nr_ptes(mm);
 		}
 		return 1;
+	} else {
+#ifdef CONFIG_DEBUG_VM
+		printk("dereference_pte_table: addr=%lx, (after) pte_table_count=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
 	}
 	return 0;
 }
