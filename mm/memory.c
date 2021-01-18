@@ -222,7 +222,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	if(counter > 0) {
 		//the pte table can only be shared in this case
 		//the pte table was not accounted for in this process, so no mm_dec_nr_ptes
-		printk("free_pte_range: addr=%lx, not freeing table", addr);
+		printk("free_pte_range: addr=%lx, counter=%ld, not freeing table", addr, counter);
 		return;  //pte table is still in use
 	}
 

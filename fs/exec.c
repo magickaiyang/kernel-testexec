@@ -621,6 +621,8 @@ EXPORT_SYMBOL(copy_strings_kernel);
  * 4) Free up any cleared pgd range.
  * 5) Shrink the vma to cover only the new range.
  */
+pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr);
+
 static int shift_arg_pages(struct vm_area_struct *vma, unsigned long shift)
 {
 	struct mm_struct *mm = vma->vm_mm;
@@ -630,6 +632,7 @@ static int shift_arg_pages(struct vm_area_struct *vma, unsigned long shift)
 	unsigned long new_start = old_start - shift;
 	unsigned long new_end = old_end - shift;
 	struct mmu_gather tlb;
+	struct page *table_page;
 
 	BUG_ON(new_start > new_end);
 
@@ -653,6 +656,11 @@ static int shift_arg_pages(struct vm_area_struct *vma, unsigned long shift)
 	if (length != move_page_tables(vma, old_start,
 				       vma, new_start, length, false))
 		return -ENOMEM;
+
+	// kyz: marks the old pte table as not in use
+	// the temporary stack VMA is exactly one page big
+	table_page = pmd_page(*get_old_pmd(vma->vm_mm, old_start));
+	atomic64_dec(&(table_page->pte_table_refcount));
 
 	lru_add_drain();
 	tlb_gather_mmu(&tlb, mm, old_start, old_end);

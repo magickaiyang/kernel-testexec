@@ -30,7 +30,8 @@
 
 #include "internal.h"
 
-static pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
+//kyz: exported
+pmd_t *get_old_pmd(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	p4d_t *p4d;
