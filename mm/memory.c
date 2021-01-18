@@ -1437,7 +1437,6 @@ again:
 				    likely(!(vma->vm_flags & VM_SEQ_READ)))
 					mark_page_accessed(page);
 			}
-			rss[mm_counter(page)]--;
 
 			/* If not invalidate_pmd, then
 			** 1. The pte table is fully within one VMA
@@ -1445,6 +1444,7 @@ again:
 			 */
 			if(!invalidate_pmd) {
 				page_remove_rmap(page, false); //the current pte table is end of life
+				rss[mm_counter(page)]--;
 			} else {
 				continue;  //__tlb_remove_page below will decrement the page's _refcount. Not what we want!
 			}
@@ -1582,7 +1582,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			}
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-			atomic64_dec_and_test(&(table_page->pte_table_refcount));
+			atomic64_dec(&(table_page->pte_table_refcount));
 		}
 next:
 		cond_resched();
