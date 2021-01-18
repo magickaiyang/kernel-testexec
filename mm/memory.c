@@ -492,18 +492,15 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 
 int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
-	spinlock_t *ptl;
 	pgtable_t new = pte_alloc_one(mm);
 	if (!new)
 		return -ENOMEM;
 	smp_wmb(); /* Could be smp_wmb__xxx(before|after)_spin_lock */
 
-	ptl = pmd_lock(mm, pmd);
 	mm_inc_nr_ptes(mm);
 	//kyz: won't check if the pte table already exists
 	pmd_populate(mm, pmd, new);
 	new = NULL;
-	spin_unlock(ptl);
 	if (new)
 		pte_free(mm, new);
 	return 0;
