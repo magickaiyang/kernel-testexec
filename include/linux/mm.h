@@ -1933,6 +1933,11 @@ static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 	return ptlock_ptr(pmd_page(*pmd));
 }
 
+static inline spinlock_t *tfork_pte_lockptr(pmd_t pmd_val)
+{
+	return ptlock_ptr(pmd_page(pmd_val));
+}
+
 static inline bool ptlock_init(struct page *page)
 {
 	/*
