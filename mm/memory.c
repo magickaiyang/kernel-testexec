@@ -222,7 +222,9 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	if(counter > 0) {
 		//the pte table can only be shared in this case
 		//the pte table was not accounted for in this process, so no mm_dec_nr_ptes
+#ifdef CONFIG_DEBUG_VM
 		printk("free_pte_range: addr=%lx, counter=%ld, not freeing table", addr, counter);
+#endif
 		return;  //pte table is still in use
 	}
 
@@ -1082,7 +1084,6 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		table_page = pmd_page(*src_pmd);
 		if(vma->pte_table_counter_pending) { // kyz : the old VMA hasn't been counted in the PTE table, count it now
 			atomic64_add(2, &(table_page->pte_table_refcount));
-			vma->pte_table_counter_pending = false;
 #ifdef CONFIG_DEBUG_VM
 			printk("copy_pmd_range: addr=%lx, pte table counter (after counting old&new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
 #endif
@@ -3650,21 +3651,6 @@ setpte:
 	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, vmf->address, vmf->pte);
-
-	// kyz : one more VMA is using the pte table
-	if(vmf->vma->pte_table_counter_pending) {
-		atomic64_inc(&pmd_page(*vmf->pmd)->pte_table_refcount);
-		vmf->vma->pte_table_counter_pending = false;
-#ifdef CONFIG_DEBUG_VM
-		char process_name[TASK_COMM_LEN];
-		get_task_comm(process_name, vmf->vma->vm_mm->owner);
-		if (strncmp(process_name, "tfork_test", TASK_COMM_LEN) == 0) {
-			printk("do_anonymous_page: start=%lx, end=%lx, pte table ref count inc'ed\n",
-				   vmf->vma->vm_start, vmf->vma->vm_end);
-		}
-#endif
-	}
-
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 	return ret;
