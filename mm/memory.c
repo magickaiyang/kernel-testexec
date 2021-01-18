@@ -937,15 +937,13 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 {
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
-	spinlock_t *dst_ptl, *src_ptl;
+	spinlock_t *dst_ptl;
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
 	struct page *dst_pte_page;
 	init_rss_vec(rss);
 
 	src_pte = tfork_pte_offset_map(src_pmd_val, addr); //src_pte points to the old table
-	src_ptl = tfork_pte_lockptr(src_pmd_val);
-	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
 	if(!pmd_iswrite(*dst_pmd)) {
 #ifdef CONFIG_DEBUG_VM
 		printk("copy_pte_range_tfork: allocating a new table\n");
@@ -978,7 +976,6 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	arch_leave_lazy_mmu_mode();
-	spin_unlock(src_ptl);
 	pte_unmap(orig_src_pte);
 	add_mm_rss_vec(dst_mm, rss);
 	pte_unmap_unlock(orig_dst_pte, dst_ptl);
