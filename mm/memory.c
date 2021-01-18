@@ -4400,7 +4400,9 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
 	struct page *orig_pte_page;
+	spinlock_t *pmd_ptl;
 
+	pmd_ptl = pmd_lock(mm, dst_pmd);  //protects the entry in the pmd table
 	if(!pmd_none(*dst_pmd)) {
 		orig_pmd_val = *dst_pmd;
 	} else {
@@ -4439,6 +4441,8 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		addr = end;
 		dereference_pte_table(orig_pmd_val, true, mm, orig_addr);
 	} while(addr<table_end);
+
+	spin_unlock(pmd_ptl);
 }
 
 /*
