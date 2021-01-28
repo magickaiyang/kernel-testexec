@@ -81,7 +81,7 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long);
+static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long, unsigned long);
 static inline void init_rss_vec(int *rss);
 static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss);
 #include "internal.h"
@@ -466,6 +466,7 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
    add_mm_rss_vec(mm, rss);
 }
 
+/*returns 1 if the table becomes unused*/
 int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
 	struct page *table_page;
 	table_page = pmd_page(pmd_val);
@@ -1563,14 +1564,21 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
 #ifdef CONFIG_DEBUG_VM
-				printk("%s: table_start=%lx, table_end=%lx, copy then zap\n", __func__, table_start, table_end);
+				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, copy then zap\n", __func__, addr, end, table_start, table_end);
 #endif
-				tfork_one_pte_table(vma->vm_mm, pmd, addr);
-				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-				dereference_pte_table(*pmd, false, vma->vm_mm, addr);
+				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) != 1) { //dec the counter of the shared table. tfork_one_pte_table cannot find the current VMA (which is being unmapped)
+					tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
+					next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+					dereference_pte_table(*pmd, false, vma->vm_mm, addr); //operates on the private table
+				} else {
+#ifdef CONFIG_DEBUG_VM
+					printk("zap_pmd_range: the shared table is dead. NOT copying after all.\n");
+#endif
+					// the shared table will be freed by unmap_single_vma()
+				}
 			} else {
 #ifdef CONFIG_DEBUG_VM
-				printk("%s: table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, table_start, table_end);
+				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, addr, end, table_start, table_end);
 #endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
@@ -1727,8 +1735,9 @@ void unmap_vmas(struct mmu_gather *tlb,
 	mmu_notifier_range_init(&range, MMU_NOTIFY_UNMAP, 0, vma, vma->vm_mm,
 				start_addr, end_addr);
 	mmu_notifier_invalidate_range_start(&range);
-	for ( ; vma && vma->vm_start < end_addr; vma = vma->vm_next)
+	for ( ; vma && vma->vm_start < end_addr; vma = vma->vm_next) {
 		unmap_single_vma(tlb, vma, start_addr, end_addr, NULL);
+	}
 	mmu_notifier_invalidate_range_end(&range);
 }
 
@@ -4391,8 +4400,9 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 	return VM_FAULT_FALLBACK;
 }
 
-/*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist) */
-static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr) {
+/*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist)
+*   if end is not 0, the vma that covers addr to end will not be copied*/
+static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude) {
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
@@ -4430,6 +4440,10 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		}
 		if(vma->vm_start > addr) {
 			addr = vma->vm_start;
+		}
+		if(exclude>0 && vma->vm_start <= orig_addr && vma->vm_end >= exclude) {
+			addr = end;
+			continue;
 		}
 #ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
@@ -4640,7 +4654,7 @@ retry_pud:
 #ifdef CONFIG_DEBUG_VM
 			printk("__handle_mm_fault: PID=%d, addr=%lx\n", current->pid, address);
 #endif
-			tfork_one_pte_table(mm, vmf.pmd, vmf.address);
+			tfork_one_pte_table(mm, vmf.pmd, vmf.address, 0u);
 		}
 	}
 

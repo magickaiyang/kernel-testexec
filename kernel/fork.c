@@ -809,6 +809,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 static void check_mm(struct mm_struct *mm)
 {
+#ifdef CONFIG_DEBUG_VM
 	int i;
 
 	BUILD_BUG_ON_MSG(ARRAY_SIZE(resident_page_types) != NR_MM_COUNTERS,
@@ -824,7 +825,8 @@ static void check_mm(struct mm_struct *mm)
 
 	if (mm_pgtables_bytes(mm))
 		pr_alert("BUG: non-zero pgtables_bytes on freeing mm: %p val: %ld\n",
-				mm, mm_pgtables_bytes(mm));
+				 mm, mm_pgtables_bytes(mm));
+#endif
 
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	VM_BUG_ON_MM(mm->pmd_huge_pte, mm);

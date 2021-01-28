@@ -479,7 +479,7 @@ static __always_inline void vma_rb_erase_ignore(struct vm_area_struct *vma,
 	__vma_rb_erase(vma, root);
 }
 
-static __always_inline void vma_rb_erase(struct vm_area_struct *vma,
+__always_inline void vma_rb_erase(struct vm_area_struct *vma,
 					 struct rb_root *root)
 {
 	/*
