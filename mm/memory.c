@@ -1080,6 +1080,9 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
+		if(atomic64_read(&(table_page->pte_table_refcount)) < 0) {
+			atomic64_set(&(table_page->pte_table_refcount), 0);
+		}
 		if(vma->pte_table_counter_pending) { // kyz : the old VMA hasn't been counted in the PTE table, count it now
 			atomic64_add(2, &(table_page->pte_table_refcount));
 #ifdef CONFIG_DEBUG_VM
@@ -1259,10 +1262,10 @@ int copy_page_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	 * readonly mappings. The tradeoff is that copy_page_range is more
 	 * efficient than faulting.
 	 */
-	if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
+	/*if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
 			!vma->anon_vma)
 		return 0;
-
+*/
 	if (is_vm_hugetlb_page(vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, vma);
 
@@ -4401,7 +4404,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist)
-*   if end is not 0, the vma that covers addr to end will not be copied*/
+*   if exclude is not 0, the vma that covers addr to exclude will not be copied*/
 static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude) {
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
@@ -4433,11 +4436,12 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 			break;
 		}
 		end = pmd_addr_end(addr, vma->vm_end);
-		if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
+		/*if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
 			!vma->anon_vma) { //kyz : stays consistent with the standard fork (never copy tables for these VMAs)
 			addr = end;
 			continue;
 		}
+		*/
 		if(vma->vm_start > addr) {
 			addr = vma->vm_start;
 		}
