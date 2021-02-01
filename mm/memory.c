@@ -468,7 +468,9 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
    add_mm_rss_vec(mm, rss);
 }
 
-/*returns 1 if the table becomes unused*/
+/* pmd lock should be held
+ * returns 1 if the table becomes unused*/
+
 int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
 	struct page *table_page;
 	table_page = pmd_page(pmd_val);
@@ -1539,12 +1541,14 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				struct zap_details *details)
 {
 	pmd_t *pmd;
+	spinlock_t *ptl;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
 	bool got_new_table = false;
 
 	pmd = pmd_offset(pud, addr);
 	do {
+		ptl = pmd_lock(vma->vm_mm, pmd);
 		next = pmd_addr_end(addr, end);
 		if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
 			if (next - addr != HPAGE_PMD_SIZE)
@@ -1600,6 +1604,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			atomic64_dec(&(table_page->pte_table_refcount));
 		}
 next:
+		spin_unlock(ptl);
 		cond_resched();
 	} while (pmd++, addr = next, addr != end);
 
@@ -4417,11 +4422,9 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
-	spinlock_t *pmd_ptl;
 	bool copied = false;
 	struct page *orig_pte_page;
 
-	pmd_ptl = pmd_lock(mm, dst_pmd);  //protects the entry in the pmd table
 	if(!pmd_none(*dst_pmd)) {
 		orig_pmd_val = *dst_pmd;
 	} else {
@@ -4467,7 +4470,6 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		dereference_pte_table(orig_pmd_val, true, mm, orig_addr);
 	} while(addr<table_end);
 
-	spin_unlock(pmd_ptl);
 	return copied;
 }
 
@@ -4591,6 +4593,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	pgd_t *pgd;
 	p4d_t *p4d;
 	vm_fault_t ret;
+	spinlock_t *ptl;
 
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
@@ -4669,7 +4672,9 @@ retry_pud:
 #ifdef CONFIG_DEBUG_VM
 			printk("__handle_mm_fault: PID=%d, addr=%lx\n", current->pid, address);
 #endif
+			ptl = pmd_lock(mm, vmf.pmd);
 			tfork_one_pte_table(mm, vmf.pmd, vmf.address, 0u);
+			spin_unlock(ptl);
 		}
 	}
 
