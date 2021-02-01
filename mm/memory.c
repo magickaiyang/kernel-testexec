@@ -4419,6 +4419,7 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	pmd_t orig_pmd_val;
 	spinlock_t *pmd_ptl;
 	bool copied = false;
+	struct page *orig_pte_page;
 
 	pmd_ptl = pmd_lock(mm, dst_pmd);  //protects the entry in the pmd table
 	if(!pmd_none(*dst_pmd)) {
