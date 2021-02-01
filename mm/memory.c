@@ -450,6 +450,9 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
 
 	   if (pte_present(ptent)) {
 		   struct page *page;
+		   if(pte_special(ptent)) { //known special pte: vvar VMA, which has just one page shared system-wide. Shouldn't matter
+			   continue;
+		   }
 		   page = vm_normal_page(NULL, addr, ptent); //kyz : vma is not important
 		   if (unlikely(!page))
 			   continue;
@@ -4414,7 +4417,6 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
-	struct page *orig_pte_page;
 	spinlock_t *pmd_ptl;
 	bool copied = false;
 
