@@ -211,4 +211,18 @@ fi
 
 create_package "$packagename" "$tmpdir"
 
+if [ -n "$BUILD_DEBUG" ] ; then
+        # Build debug package
+        # Different tools want the image in different locations
+        # perf
+        mkdir -p $dbg_dir/usr/lib/debug/lib/modules/$version/
+        cp vmlinux $dbg_dir/usr/lib/debug/lib/modules/$version/
+        # systemtap
+        mkdir -p $dbg_dir/usr/lib/debug/boot/
+        ln -s ../lib/modules/$version/vmlinux $dbg_dir/usr/lib/debug/boot/vmlinux-$version
+        # kdump-tools
+        ln -s lib/modules/$version/vmlinux $dbg_dir/usr/lib/debug/vmlinux-$version
+        create_package "$dbg_packagename" "$dbg_dir"
+fi
+
 exit 0
