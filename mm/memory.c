@@ -81,7 +81,7 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-static void tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long, unsigned long);
+static bool tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long, unsigned long);
 static inline void init_rss_vec(int *rss);
 static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss);
 #include "internal.h"
@@ -454,12 +454,11 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
 		   if (unlikely(!page))
 			   continue;
 		   rss[mm_counter(page)]--;
+#ifdef CONFIG_DEBUG_VM
+		   printk("zap_one_pte_table: addr=%lx, end=%lx, (before) mapcount=%d, refcount=%d\n", addr, end, page_mapcount(page), page_ref_count(page));
+#endif
 		   page_remove_rmap(page, false);
 		   put_page(page);
-
-#ifdef CONFIG_DEBUG_VM
-		   printk("zap_one_pte_table: addr=%lx, (after) mapcount=%d, refcount=%d\n", addr, page_mapcount(page), page_ref_count(page));
-#endif
 	   }
    } while (pte++, addr += PAGE_SIZE, addr != end);
 
@@ -1539,6 +1538,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	pmd_t *pmd;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
+	bool got_new_table = false;
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -1570,9 +1570,13 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, copy then zap\n", __func__, addr, end, table_start, table_end);
 #endif
 				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) != 1) { //dec the counter of the shared table. tfork_one_pte_table cannot find the current VMA (which is being unmapped)
-					tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
-					next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-					dereference_pte_table(*pmd, false, vma->vm_mm, addr); //operates on the private table
+					got_new_table = tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
+					if(got_new_table) {
+						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+						dereference_pte_table(*pmd, false, vma->vm_mm, addr); //operates on the private table
+					} else {//no more VMAs in this process are using the table, but there may be other processes using it.
+						next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+					}
 				} else {
 #ifdef CONFIG_DEBUG_VM
 					printk("zap_pmd_range: the shared table is dead. NOT copying after all.\n");
@@ -4404,13 +4408,15 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table, covering multiple VMAs (if they exist)
+ *  Returns true if a new table is put in place, false otherwise.
 *   if exclude is not 0, the vma that covers addr to exclude will not be copied*/
-static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude) {
+static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude) {
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
 	struct page *orig_pte_page;
 	spinlock_t *pmd_ptl;
+	bool copied = false;
 
 	pmd_ptl = pmd_lock(mm, dst_pmd);  //protects the entry in the pmd table
 	if(!pmd_none(*dst_pmd)) {
@@ -4453,11 +4459,13 @@ static void tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
 #endif
 		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
+		copied = true;
 		addr = end;
 		dereference_pte_table(orig_pmd_val, true, mm, orig_addr);
 	} while(addr<table_end);
 
 	spin_unlock(pmd_ptl);
+	return copied;
 }
 
 /*
