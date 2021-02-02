@@ -1693,6 +1693,10 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	end = min(vma->vm_end, end_addr);
 	if (end <= vma->vm_start)
 		return;
+	//kyz: never unmaps part of a VMA, unless called by exit_mmap()
+	if(end!=vma->vm_end && end_addr!=((unsigned long)-1)) {
+		return;
+	}
 
 	if (vma->vm_file)
 		uprobe_munmap(vma, start, end);
