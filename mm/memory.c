@@ -1582,7 +1582,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 					got_new_table = tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
 					if(got_new_table) {
 						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-						dereference_pte_table(*pmd, false, vma->vm_mm, addr); //operates on the private table
 					} else {//no more VMAs in this process are using the table, but there may be other processes using it.
 						next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
 					}
