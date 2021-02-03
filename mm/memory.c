@@ -697,6 +697,7 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 		if (pte_devmap(pte))
 			return NULL;
 
+		printk("vm_normal_page: special and not found\n");
 		print_bad_pte(vma, addr, pte, NULL);
 		return NULL;
 	}
@@ -723,6 +724,7 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 
 check_pfn:
 	if (unlikely(pfn > highest_memmap_pfn)) {
+		printk("vm_normal_page: too large pfn\n");
 		print_bad_pte(vma, addr, pte, NULL);
 		return NULL;
 	}
@@ -1693,11 +1695,6 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	end = min(vma->vm_end, end_addr);
 	if (end <= vma->vm_start)
 		return;
-	//kyz: never unmaps part of a VMA, unless called by exit_mmap()
-	if(end!=vma->vm_end && end_addr!=((unsigned long)-1)) {
-		return;
-	}
-
 	if (vma->vm_file)
 		uprobe_munmap(vma, start, end);
 

@@ -2764,9 +2764,14 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	/* Does it split the last one? */
 	last = find_vma(mm, end);
 	if (last && end > last->vm_start) {
-		int error = __split_vma(mm, last, end, 1);
+		//kyz: never unmaps part of a VMA, unless called by exit_mmap()
+#ifdef CONFIG_DEBUG_VM
+		printk("__do_munmap: start=%lx, end=%lx, the last VMA in range is split\n", start, end);
+#endif
+		return -EINVAL;
+		/*int error = __split_vma(mm, last, end, 1);
 		if (error)
-			return error;
+			return error;*/
 	}
 	vma = prev ? prev->vm_next : mm->mmap;
 
