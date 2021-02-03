@@ -1572,7 +1572,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		table_page = pmd_page(*pmd);
 		table_start = pte_table_start(addr);
 
-		if(!pmd_iswrite(*pmd)) {//shared pte table
+		if((!pmd_iswrite(*pmd)) && (!vma->pte_table_counter_pending)) {//shared pte table. vma has gone through odf
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
 #ifdef CONFIG_DEBUG_VM
@@ -1582,7 +1582,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 					got_new_table = tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
 					if(got_new_table) {
 						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-						dereference_pte_table(*pmd, false, vma->vm_mm, addr); //operates on the private table
 					} else {//no more VMAs in this process are using the table, but there may be other processes using it.
 						next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
 					}
@@ -1603,7 +1602,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			}
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-			atomic64_dec(&(table_page->pte_table_refcount));
 		}
 next:
 		spin_unlock(ptl);
@@ -4449,6 +4447,10 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 			break;
 		}
 		end = pmd_addr_end(addr, vma->vm_end);
+		if(vma->pte_table_counter_pending) {  //this vma is newly mapped (clean) and (fully/partly) described by this pte table
+			addr = end;
+			continue;
+		}
 		/*if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
 			!vma->anon_vma) { //kyz : stays consistent with the standard fork (never copy tables for these VMAs)
 			addr = end;
