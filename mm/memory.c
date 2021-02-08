@@ -1602,6 +1602,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			}
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+			if(!vma->pte_table_counter_pending) {
+				atomic64_dec(&(table_page->pte_table_refcount));
+			}
 		}
 next:
 		spin_unlock(ptl);
