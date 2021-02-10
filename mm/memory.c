@@ -4463,7 +4463,7 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 		if(!vma) {
 			break;  //inexplicable
 		}
-		if(vma->vm_start > table_end) {
+		if(vma->vm_start >= table_end) {
 			break;
 		}
 		end = pmd_addr_end(addr, vma->vm_end);
