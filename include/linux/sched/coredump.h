@@ -74,6 +74,9 @@ static inline int get_dumpable(struct mm_struct *mm)
 #define MMF_OOM_REAP_QUEUED	26	/* mm was queued for oom_reaper */
 #define MMF_DISABLE_THP_MASK	(1 << MMF_DISABLE_THP)
 
+#define MMF_USE_ODF 27
+#define MMF_USE_ODF_MASK (1 << MMF_USE_ODF)
+
 #define MMF_INIT_MASK		(MMF_DUMPABLE_MASK | MMF_DUMP_FILTER_MASK |\
 				 MMF_DISABLE_THP_MASK)
 

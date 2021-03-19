@@ -1645,7 +1645,13 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	}
 
 	retval = -ENOMEM;
-	mm = dup_mm(tsk, current->mm);
+
+	if(oldmm->flags & MMF_USE_ODF_MASK) {
+		printk("fork redirected to ODF\n");
+		mm = dup_mm_tfork(tsk, current->mm);
+	} else {
+		mm = dup_mm(tsk, current->mm);
+	}
 	if (!mm)
 		goto fail_nomem;
 
