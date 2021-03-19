@@ -15,4 +15,8 @@ sudo dpkg -i linux-image-5.6.19*
 ```
 
 ### Usage
-In your applications, replace `fork()` with `syscall(439)` to invoke ODF.
+Use ODF in one of the following ways:
+
+- In your application, replace `fork()` with `syscall(439)` to invoke ODF.
+
+- Automatically redirect all `fork()` calls to ODF in your application by setting `/proc/<pid>/use_odf` to `1`. When a new process is created, the process inherits the flag from its parent.
