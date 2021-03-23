@@ -470,7 +470,6 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
 
 /* pmd lock should be held
  * returns 1 if the table becomes unused*/
-
 int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
 	struct page *table_page;
 	table_page = pmd_page(pmd_val);
@@ -490,6 +489,31 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 	} else {
 #ifdef CONFIG_DEBUG_VM
 		printk("dereference_pte_table: addr=%lx, (after) pte_table_count=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
+	}
+	return 0;
+}
+
+int dereference_pte_table_multiple(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr, int num) {
+	struct page *table_page;
+	table_page = pmd_page(pmd_val);
+
+	int count_after = atomic64_sub_return(num, &(table_page->pte_table_refcount));
+	if(count_after <= 0) {
+#ifdef CONFIG_DEBUG_VM
+		printk("dereference_pte_table_multiple: addr=%lx, free_table=%d, num=%d, after count=%d, table reached end of life\n", addr, free_table, num, count_after);
+#endif
+
+		zap_one_pte_table(pmd_val, addr, mm);
+		if(free_table) {
+			pgtable_pte_page_dtor(table_page);
+			__free_page(table_page);
+			mm_dec_nr_ptes(mm);
+		}
+		return 1;
+	} else {
+#ifdef CONFIG_DEBUG_VM
+		printk("dereference_pte_table_multiple: addr=%lx, num=%d, (after) count=%lld\n", addr, num, atomic64_read(&(table_page->pte_table_refcount)));
 #endif
 	}
 	return 0;
@@ -4443,6 +4467,7 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 	pmd_t orig_pmd_val;
 	bool copied = false;
 	struct page *orig_pte_page;
+	int num_vmas = 0;
 
 	if(!pmd_none(*dst_pmd)) {
 		orig_pmd_val = *dst_pmd;
@@ -4487,12 +4512,13 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 #ifdef CONFIG_DEBUG_VM
 		printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx\n", vma->vm_start, vma->vm_end);
 #endif
+		num_vmas++;
 		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
 		copied = true;
 		addr = end;
-		dereference_pte_table(orig_pmd_val, true, mm, orig_addr);
 	} while(addr<table_end);
 
+	dereference_pte_table_multiple(orig_pmd_val, true, mm, orig_addr, num_vmas);
 	return copied;
 }
 
