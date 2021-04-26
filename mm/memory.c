@@ -1622,9 +1622,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 #ifdef CONFIG_DEBUG_VM
 						printk("zap_pmd_range: no more VMAs in this process are using the table, but there are other processes using it\n");
 #endif
-						copy_pte_range_tfork(vma->vm_mm, pmd, *pmd, vma, (addr>table_start)?addr:table_start, (end<table_end)?end:table_end); //free_pte_range WILL be called. we have no option but to copy this one VMA.
-						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-						atomic64_dec(&(pmd_page(*pmd)->pte_table_refcount));
+						pmd_clear(pmd);
 					}
 				} else {
 #ifdef CONFIG_DEBUG_VM
