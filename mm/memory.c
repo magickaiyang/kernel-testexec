@@ -239,6 +239,7 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pmd_t *pmd;
 	unsigned long next;
 	unsigned long start;
+	spinlock_t *ptl;
 
 	start = addr;
 	pmd = pmd_offset(pud, addr);
@@ -246,7 +247,10 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		next = pmd_addr_end(addr, end);
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
+		//kyz
+		ptl = pmd_lock(tlb->mm, pmd);
 		free_pte_range(tlb, pmd, addr);
+		spin_unlock(ptl);
 	} while (pmd++, addr = next, addr != end);
 
 	start &= PUD_MASK;
