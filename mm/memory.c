@@ -1118,9 +1118,6 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
-		if(atomic64_read(&(table_page->pte_table_refcount)) < 0) {
-			atomic64_set(&(table_page->pte_table_refcount), 0);
-		}
 		if(vma->pte_table_counter_pending) { // kyz : the old VMA hasn't been counted in the PTE table, count it now
 			atomic64_add(2, &(table_page->pte_table_refcount));
 #ifdef CONFIG_DEBUG_VM
