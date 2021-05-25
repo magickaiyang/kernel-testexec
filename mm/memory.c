@@ -239,7 +239,6 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pmd_t *pmd;
 	unsigned long next;
 	unsigned long start;
-	spinlock_t *ptl;
 
 	start = addr;
 	pmd = pmd_offset(pud, addr);
@@ -247,10 +246,10 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		next = pmd_addr_end(addr, end);
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
-		//kyz
-		ptl = pmd_lock(tlb->mm, pmd);
+#ifdef CONFIG_DEBUG_VM
+		//printk("free hit: addr=%lx, table_page=%px\n", addr, pmd_page(*pmd));
+#endif
 		free_pte_range(tlb, pmd, addr);
-		spin_unlock(ptl);
 	} while (pmd++, addr = next, addr != end);
 
 	start &= PUD_MASK;
@@ -977,10 +976,10 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 
 	src_pte = tfork_pte_offset_map(src_pmd_val, addr); //src_pte points to the old table
 	if(!pmd_iswrite(*dst_pmd)) {
-#ifdef CONFIG_DEBUG_VM
-		printk("copy_pte_range_tfork: allocating a new table\n");
-#endif
 		dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
+#ifdef CONFIG_DEBUG_VM
+		printk("copy_pte_range_tfork: allocated new table. addr=%lx, prev_table_page=%px, table_page=%px\n", addr, pmd_page(src_pmd_val), pmd_page(*dst_pmd));
+#endif
 	} else {
 		dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	}
@@ -1637,8 +1636,8 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 #endif
 				//kyz: shared and fully covered by the VMA, preserve the pte entries
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-				dereference_pte_table(*pmd, false, vma->vm_mm, addr);
-				set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
+				dereference_pte_table(*pmd, true, vma->vm_mm, addr);
+				pmd_clear(pmd);
 			}
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
