@@ -1124,8 +1124,16 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 #endif
 		} else {
 			atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
+			if(atomic64_read(&(table_page->pte_table_refcount)) == 1) {  //the VMA is old, but the pte table is new (created by a fault after the last odf call)
+				atomic64_set(&(table_page->pte_table_refcount), 2);
 #ifdef CONFIG_DEBUG_VM
-			printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+				printk("copy_pmd_range: addr=%lx, pte table counter (old VMA, new pte table)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
+			}
+#ifdef CONFIG_DEBUG_VM
+			else {
+				printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+			}
 #endif
 		}
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
@@ -4530,8 +4538,6 @@ static bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned l
 static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
-	struct page *table_page;
-	vm_fault_t ret = 0;
 
 	if (unlikely(pmd_none(*vmf->pmd))) {
 		/*
@@ -4571,23 +4577,11 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma)) {//kyz: freshly mmaped anonymous region
-			ret = do_anonymous_page(vmf);
+			return do_anonymous_page(vmf);
 		}
 		else {
-			ret = do_fault(vmf);
+			return do_fault(vmf);
 		}
-
-		/* If a new pte table is added after an ODF, initialize it */
-		if(!pmd_none(*vmf->pmd)) {
-			table_page = pmd_page(*vmf->pmd);
-			if(!(vmf->vma->pte_table_counter_pending)) {
-				if(atomic64_read(&(table_page->pte_table_refcount))==0) {
-					atomic64_inc(&(table_page->pte_table_refcount));
-				}
-			}
-		}
-
-		return ret;
 	}
 
 	if (!pte_present(vmf->orig_pte))
