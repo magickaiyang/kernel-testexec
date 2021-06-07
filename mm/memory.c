@@ -249,7 +249,11 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 #ifdef CONFIG_DEBUG_VM
 		//printk("free hit: addr=%lx, table_page=%px\n", addr, pmd_page(*pmd));
 #endif
-		free_pte_range(tlb, pmd, addr);
+		if(tlb->mm->flags & MMF_USE_ODF_MASK) {
+			//temporarily disable free page table pages for relevant processes
+		} else {
+			free_pte_range(tlb, pmd, addr);
+		}
 	} while (pmd++, addr = next, addr != end);
 
 	start &= PUD_MASK;
@@ -1609,6 +1613,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		table_start = pte_table_start(addr);
 
 		if((!pmd_iswrite(*pmd)) && (!vma->pte_table_counter_pending)) {//shared pte table. vma has gone through odf
+			/*
 			table_end = pte_table_end(addr);
 			if(table_start < vma->vm_start || table_end > vma->vm_end) {
 #ifdef CONFIG_DEBUG_VM
@@ -1639,6 +1644,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				dereference_pte_table(*pmd, true, vma->vm_mm, addr);
 				pmd_clear(pmd);
 			}
+			*/
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 			if(!vma->pte_table_counter_pending) {
