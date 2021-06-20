@@ -4720,19 +4720,7 @@ retry_pud:
 			printk("__handle_mm_fault: PID=%d, addr=%lx\n", current->pid, address);
 #endif
 			ptl = pmd_lock(mm, vmf.pmd);
-
-			//optimization: if the VMA is the only user of the shared table, do not copy!
-			unsigned long table_start = pte_table_start(vmf.address);
-			unsigned long table_end = pte_table_end(vmf.address);
-			int count = atomic64_read(&(pmd_page(*(vmf.pmd))->pte_table_refcount));
-			if(table_start >= vma->vm_start && table_end <= vma->vm_end && count==1) {
-#ifdef CONFIG_DEBUG_VM
-				printk("__handle_mm_fault: reposessing a shared table for addr=%lx\n", address);
-#endif
-				set_pmd_at(vmf.vma->vm_mm, vmf.address, vmf.pmd, pmd_mkwrite(*(vmf.pmd)));  //shares the table with the child
-			} else {
-				tfork_one_pte_table(mm, vmf.pmd, vmf.address, 0u);
-			}
+			tfork_one_pte_table(mm, vmf.pmd, vmf.address, 0u);
 			spin_unlock(ptl);
 		}
 	}
