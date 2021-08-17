@@ -1125,12 +1125,7 @@ static int pgtable_counter_fixup_pmd_entry(pmd_t *pmd, unsigned long addr,
 {
 	struct page *table_page;
 	table_page = pmd_page(*pmd);
-	atomic64_inc(&(table_page->pte_table_refcount));
-
-#ifdef CONFIG_DEBUG_VM
-	printk("fixup inc: addr=%lx\n", addr);
-#endif
-
+	atomic_inc(&(table_page->pte_table_refcount));
 	walk->action = ACTION_CONTINUE;  //skip pte level
 	return 0;
 }
@@ -1150,9 +1145,6 @@ int merge_vma_pgtable_counter_fixup(struct vm_area_struct *vma, unsigned long st
 	if(vma->pte_table_counter_pending) {
 		return 0;
 	} else {
-#ifdef CONFIG_DEBUG_VM
-		printk("merge fixup: vm_start=%lx, vm_end=%lx, inc start=%lx, inc end=%lx\n", vma->vm_start, vma->vm_end, start, end);
-#endif
 		start = pte_table_end(start);
 		end = pte_table_start(end);
 		__mm_populate_nolock(start, end-start, 1); //popuate tables for extended address range so that we can increment counters
@@ -1630,14 +1622,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	addr = mmap_region(file, addr, len, vm_flags, pgoff, uf);
 	if (!IS_ERR_VALUE(addr) &&
-	    ((vm_flags & VM_LOCKED) ||
-	     (flags & (MAP_POPULATE | MAP_NONBLOCK)) == MAP_POPULATE ||
-	     (mm->flags & MMF_USE_ODF_MASK))) {
-#ifdef CONFIG_DEBUG_VM
-		if(mm->flags & MMF_USE_ODF_MASK) {
-			printk("mmap: force populate, addr=%lx, len=%lx\n", addr, len);
-		}
-#endif
+		((vm_flags & VM_LOCKED) ||
+		 (flags & (MAP_POPULATE | MAP_NONBLOCK)) == MAP_POPULATE ||
+		 (mm->flags & MMF_USE_ODF_MASK))) {
 		*populate = len;
 	}
 	return addr;
@@ -2859,18 +2846,12 @@ int split_vma_pgtable_counter_fixup(struct vm_area_struct *lvma, struct vm_area_
 	if(orig_pending_flag) {
 		return 0;  //the new vma will have pending flag as true by default, just as the old vma
 	} else {
-#ifdef CONFIG_DEBUG_VM
-		printk("split fixup: set vma flag to false, rvma_start=%lx\n", rvma->vm_start);
-#endif
 		lvma->pte_table_counter_pending = false;
 		rvma->pte_table_counter_pending = false;
 
 		if(pte_table_start(rvma->vm_start) == rvma->vm_start) {  //the split was right at the pte table boundary
 			return 0;  //the only case where we don't increment pte table counter
 		} else {
-#ifdef CONFIG_DEBUG_VM
-			printk("split fixup: rvma_start=%lx\n", rvma->vm_start);
-#endif
 			walk_page_range(rvma->vm_mm, pte_table_start(rvma->vm_start), pte_table_end(rvma->vm_start), &pgtable_counter_fixup_walk_ops, NULL);
 		}
 	}

@@ -83,6 +83,8 @@
 static struct kmem_cache *anon_vma_cachep;
 static struct kmem_cache *anon_vma_chain_cachep;
 
+bool tfork_one_pte_table(struct mm_struct *, pmd_t *, unsigned long, unsigned long);
+
 static inline struct anon_vma *anon_vma_alloc(void)
 {
 	struct anon_vma *anon_vma;
@@ -1499,6 +1501,10 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 			}
 		}
 
+		/* Unshare page tables */
+		if((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
+			tfork_one_pte_table(mm, pvmw.pmd, pvmw.address, 0);
+
 		/* Nuke the page table entry. */
 		flush_cache_page(vma, address, pte_pfn(*pvmw.pte));
 		if (should_defer_flush(mm, flags)) {
@@ -1794,6 +1800,10 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 				break;
 			}
 		}
+
+		/* Unshare page tables */
+		if((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
+			tfork_one_pte_table(mm, pvmw.pmd, pvmw.address, 0);
 
 		/* Nuke the page table entry. */
 		flush_cache_page(vma, address, pte_pfn(*pvmw.pte));

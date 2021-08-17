@@ -2341,7 +2341,7 @@ static inline bool pgtable_pte_page_ctor(struct page *page)
 	__SetPageTable(page);
 	inc_lruvec_page_state(page, NR_PAGETABLE);
 
-	atomic64_set(&(page->pte_table_refcount), 0);
+	atomic_set(&(page->pte_table_refcount), 0);
 
 	return true;
 }
