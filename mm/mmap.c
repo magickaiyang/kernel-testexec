@@ -277,7 +277,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 
 success:
 	populate = newbrk > oldbrk && (mm->def_flags & VM_LOCKED) != 0;
-	if(mm->flags & MMF_USE_ODF_MASK) { //for ODF
+	if (mm->flags & MMF_USE_ODF_MASK) { //for ODF
 		populate = true;
 	}
 	if (downgraded)
@@ -1124,6 +1124,7 @@ static int pgtable_counter_fixup_pmd_entry(pmd_t *pmd, unsigned long addr,
 			       unsigned long next, struct mm_walk *walk)
 {
 	struct page *table_page;
+
 	table_page = pmd_page(*pmd);
 	atomic_inc(&(table_page->pte_table_refcount));
 	walk->action = ACTION_CONTINUE;  //skip pte level
@@ -1141,13 +1142,15 @@ static const struct mm_walk_ops pgtable_counter_fixup_walk_ops = {
 .test_walk = pgtable_counter_fixup_test
 };
 
-int merge_vma_pgtable_counter_fixup(struct vm_area_struct *vma, unsigned long start, unsigned long end) {
-	if(vma->pte_table_counter_pending) {
+int merge_vma_pgtable_counter_fixup(struct vm_area_struct *vma, unsigned long start, unsigned long end)
+{
+	if (vma->pte_table_counter_pending) {
 		return 0;
 	} else {
 		start = pte_table_end(start);
 		end = pte_table_start(end);
-		__mm_populate_nolock(start, end-start, 1); //popuate tables for extended address range so that we can increment counters
+		//popuate tables for extended address range so that we can increment counters
+		__mm_populate_nolock(start, end-start, 1);
 		walk_page_range(vma->vm_mm, start, end, &pgtable_counter_fixup_walk_ops, NULL);
 	}
 
@@ -2842,14 +2845,16 @@ int split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 }
 
 /* left and right vma after the split, address of split */
-int split_vma_pgtable_counter_fixup(struct vm_area_struct *lvma, struct vm_area_struct *rvma, bool orig_pending_flag) {
-	if(orig_pending_flag) {
+int split_vma_pgtable_counter_fixup(struct vm_area_struct *lvma, struct vm_area_struct *rvma, bool orig_pending_flag)
+{
+	if (orig_pending_flag) {
 		return 0;  //the new vma will have pending flag as true by default, just as the old vma
 	} else {
 		lvma->pte_table_counter_pending = false;
 		rvma->pte_table_counter_pending = false;
 
-		if(pte_table_start(rvma->vm_start) == rvma->vm_start) {  //the split was right at the pte table boundary
+		if (pte_table_start(rvma->vm_start) == rvma->vm_start) {
+			//the split was right at the pte table boundary
 			return 0;  //the only case where we don't increment pte table counter
 		} else {
 			walk_page_range(rvma->vm_mm, pte_table_start(rvma->vm_start), pte_table_end(rvma->vm_start), &pgtable_counter_fixup_walk_ops, NULL);

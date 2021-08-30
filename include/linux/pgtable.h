@@ -92,7 +92,7 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 #define pte_offset_kernel pte_offset_kernel
 static inline pte_t *tfork_pte_offset_kernel(pmd_t pmd_val, unsigned long address)
 {
-        return (pte_t *)pmd_page_vaddr(pmd_val) + pte_index(address);
+	return (pte_t *)pmd_page_vaddr(pmd_val) + pte_index(address);
 }
 #define tfork_pte_offset_kernel tfork_pte_offset_kernel
 #endif

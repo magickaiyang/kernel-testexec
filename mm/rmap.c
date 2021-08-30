@@ -1502,7 +1502,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 		}
 
 		/* Unshare page tables */
-		if((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
+		if ((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
 			tfork_one_pte_table(mm, pvmw.pmd, pvmw.address, 0);
 
 		/* Nuke the page table entry. */
@@ -1802,7 +1802,7 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		}
 
 		/* Unshare page tables */
-		if((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
+		if ((!pmd_none(*pvmw.pmd)) && (!pmd_iswrite(*pvmw.pmd)) && (vma->vm_flags & VM_WRITE))
 			tfork_one_pte_table(mm, pvmw.pmd, pvmw.address, 0);
 
 		/* Nuke the page table entry. */

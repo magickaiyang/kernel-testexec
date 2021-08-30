@@ -383,12 +383,12 @@ static inline pmd_t pmd_clear_flags(pmd_t pmd, pmdval_t clear)
 
 static inline pmd_t pmd_mknonpresent(pmd_t pmd)
 {
-       return pmd_clear_flags(pmd, _PAGE_PRESENT);
+	return pmd_clear_flags(pmd, _PAGE_PRESENT);
 }
 
 static inline pmd_t pmd_mkpresent(pmd_t pmd)
 {
-       return pmd_set_flags(pmd, _PAGE_PRESENT);
+	return pmd_set_flags(pmd, _PAGE_PRESENT);
 }
 
 #ifdef CONFIG_HAVE_ARCH_USERFAULTFD_WP
@@ -779,8 +779,9 @@ static inline int pmd_present(pmd_t pmd)
 	return pmd_flags(pmd) & (_PAGE_PRESENT | _PAGE_PROTNONE | _PAGE_PSE);
 }
 
-static inline int pmd_iswrite(pmd_t pmd) {
-       return pmd_flags(pmd) & (_PAGE_RW);
+static inline int pmd_iswrite(pmd_t pmd)
+{
+	return pmd_flags(pmd) & (_PAGE_RW);
 }
 
 #ifdef CONFIG_NUMA_BALANCING

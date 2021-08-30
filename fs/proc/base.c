@@ -2988,13 +2988,10 @@ static ssize_t proc_use_odf_write(struct file *file,
 		goto out_no_mm;
 	ret = 0;
 
-	if (val == 1) {
+	if (val == 1)
 		set_bit(MMF_USE_ODF, &mm->flags);
-	} else if (val ==0) {
+	else if (val == 0)
 		clear_bit(MMF_USE_ODF, &mm->flags);
-	} else {
-		//ignore
-	}
 
 	mmput(mm);
  out_no_mm:

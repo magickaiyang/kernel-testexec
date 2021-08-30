@@ -230,10 +230,10 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token = pmd_pgtable(*pmd);
-	long int counter;
+	long counter;
 	pmd_clear(pmd);
 	counter = atomic_read(&(token->pte_table_refcount));
-	if(counter > 0) {
+	if (counter > 0) {
 		//the pte table can only be shared in this case
 		return;  //pte table is still in use
 	}
@@ -443,71 +443,74 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 }
 
 // frees every page described by the pte table
-void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) {
-   int rss[NR_MM_COUNTERS];
-   pte_t *pte;
-   unsigned long end;
+void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm)
+{
+	int rss[NR_MM_COUNTERS];
+	pte_t *pte;
+	unsigned long end;
 
-   init_rss_vec(rss);
-   addr = pte_table_start(addr);
-   end = pte_table_end(addr);
-   pte = tfork_pte_offset_kernel(pmd_val, addr);
-   do {
-	   pte_t ptent = *pte;
-	   if (pte_none(ptent))
-		   continue;
+	init_rss_vec(rss);
+	addr = pte_table_start(addr);
+	end = pte_table_end(addr);
+	pte = tfork_pte_offset_kernel(pmd_val, addr);
+	do {
+		pte_t ptent = *pte;
 
-	   if (pte_present(ptent)) {
-		   struct page *page;
-		   if(pte_special(ptent)) { //known special pte: vvar VMA, which has just one page shared system-wide. Shouldn't matter
-			   continue;
-		   }
-		   page = vm_normal_page(NULL, addr, ptent); // vma is not important
-		   if (unlikely(!page))
-			   continue;
-		   rss[mm_counter(page)]--;
-		   page_remove_rmap(page, false);
-		   put_page(page);
-	   }
-   } while (pte++, addr += PAGE_SIZE, addr != end);
+		if (pte_none(ptent))
+			continue;
 
-   add_mm_rss_vec(mm, rss);
+		if (pte_present(ptent)) {
+			struct page *page;
+			//known special pte: vvar VMA, which has just one page shared system-wide. Shouldn't matter
+			if (pte_special(ptent))
+				continue;
+			page = vm_normal_page(NULL, addr, ptent); // vma is not important
+			if (unlikely(!page))
+				continue;
+			rss[mm_counter(page)]--;
+			page_remove_rmap(page, false);
+			put_page(page);
+		}
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+
+	add_mm_rss_vec(mm, rss);
 }
 
 /* pmd lock should be held
- * returns 1 if the table becomes unused*/
-int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
+ * returns 1 if the table becomes unused
+ */
+int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr)
+{
 	struct page *table_page;
-	table_page = pmd_page(pmd_val);
 
-	if(atomic_dec_and_test(&(table_page->pte_table_refcount))) {
+	table_page = pmd_page(pmd_val);
+	if (atomic_dec_and_test(&(table_page->pte_table_refcount))) {
 		zap_one_pte_table(pmd_val, addr, mm);
-		if(free_table) {
+		if (free_table) {
 			pgtable_pte_page_dtor(table_page);
 			__free_page(table_page);
 			mm_dec_nr_ptes(mm);
 		}
 		return 1;
-	} else {
 	}
 	return 0;
 }
 
-int dereference_pte_table_multiple(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr, int num) {
+int dereference_pte_table_multiple(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr, int num)
+{
 	struct page *table_page;
 	int count_after;
 
 	table_page = pmd_page(pmd_val);
 	count_after = atomic_sub_return(num, &(table_page->pte_table_refcount));
-	if(count_after <= 0) {
+	if (count_after <= 0) {
 		zap_one_pte_table(pmd_val, addr, mm);
-		if(free_table) {
+		if (free_table) {
 			pgtable_pte_page_dtor(table_page);
 			__free_page(table_page);
 			mm_dec_nr_ptes(mm);
 		}
 		return 1;
-	} else {
 	}
 	return 0;
 }
@@ -515,6 +518,7 @@ int dereference_pte_table_multiple(pmd_t pmd_val, bool free_table, struct mm_str
 int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
 	pgtable_t new = pte_alloc_one(mm);
+
 	if (!new)
 		return -ENOMEM;
 	smp_wmb(); /* Could be smp_wmb__xxx(before|after)_spin_lock */
@@ -1035,11 +1039,10 @@ copy_one_pte_tfork(struct mm_struct *dst_mm,
 
 	/*
 	 * If it's a COW mapping
-	 * only protect in the child (the faulting process)
+	 * only protect in the faulting process
 	 */
-	if (is_cow_mapping(vm_flags) && pte_write(pte)) {
+	if (is_cow_mapping(vm_flags) && pte_write(pte))
 		pte = pte_wrprotect(pte);
-	}
 
 	/*
 	 * If it's a shared mapping, mark it clean in
@@ -1141,14 +1144,13 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	int rss[NR_MM_COUNTERS];
 	swp_entry_t entry = (swp_entry_t){0};
 	struct page *dst_pte_page;
-	init_rss_vec(rss);
 
+	init_rss_vec(rss);
 	src_pte = tfork_pte_offset_kernel(src_pmd_val, addr); //src_pte points to the old table
-	if(!pmd_iswrite(*dst_pmd)) {
+	if (!pmd_iswrite(*dst_pmd))
 		dst_pte = tfork_pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);  //dst_pte points to a new table
-	} else {
+	else
 		dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
-	}
 	if (!dst_pte)
 		return -ENOMEM;
 
@@ -1160,13 +1162,12 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	arch_enter_lazy_mmu_mode();
 
 	do {
-		if (pte_none(*src_pte)) {
+		if (pte_none(*src_pte))
 			continue;
-		}
 		entry.val = copy_one_pte_tfork(dst_mm, dst_pte, src_pte,
 							vma, addr, rss);
 		if (entry.val)
-			printk("failed copy_one_pte_tfork call\n");
+			pr_warn("failed copy_one_pte_tfork call\n");
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	arch_leave_lazy_mmu_mode();
@@ -1332,21 +1333,20 @@ copy_pmd_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 		}
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
-		if(src_mm->flags & MMF_USE_ODF_MASK) {
+		if (src_mm->flags & MMF_USE_ODF_MASK) {
 			src_pmd_value = *src_pmd;
 			//sets write-protect to the pmd entry if the vma is writable
-			if(src_vma->vm_flags & VM_WRITE) {
+			if (src_vma->vm_flags & VM_WRITE) {
 				src_pmd_value = pmd_wrprotect(src_pmd_value);
 				set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 			}
 			table_page = pmd_page(*src_pmd);
-			if(src_vma->pte_table_counter_pending) { // the old VMA hasn't been counted in the PTE table, count it now
+			if (src_vma->pte_table_counter_pending) // the old VMA hasn't been counted in the PTE table, count it now
 				atomic_add(2, &(table_page->pte_table_refcount));
-			} else {
+			else {
 				atomic_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
-				if(atomic_read(&(table_page->pte_table_refcount)) == 1) {  //the VMA is old, but the pte table is new (created by a fault after the last odf call)
+				if (atomic_read(&(table_page->pte_table_refcount)) == 1) //the VMA is old, but the pte table is new (created by a fault after the last odf call)
 					atomic_set(&(table_page->pte_table_refcount), 2);
-				}
 			}
 			set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 		} else {
@@ -1541,7 +1541,7 @@ again:
 				    details->check_mapping != page_rmapping(page))
 					continue;
 			}
-			if(!invalidate_pmd) {
+			if (!invalidate_pmd) {
 				ptent = ptep_get_and_clear_full(mm, addr, pte,
 						tlb->fullmm);
 			}
@@ -1558,7 +1558,7 @@ again:
 				    likely(!(vma->vm_flags & VM_SEQ_READ)))
 					mark_page_accessed(page);
 			}
-			if(!invalidate_pmd) {
+			if (!invalidate_pmd) {
 				rss[mm_counter(page)]--;
 				page_remove_rmap(page, false);
 			} else {
@@ -1690,16 +1690,17 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		table_page = pmd_page(*pmd);
 		table_start = pte_table_start(addr);
 
-		if((!pmd_iswrite(*pmd)) && (!vma->pte_table_counter_pending)) {//shared pte table. vma has gone through odf
+		if ((!pmd_iswrite(*pmd)) && (!vma->pte_table_counter_pending)) {
+			//shared pte table. vma has gone through odf
 			table_end = pte_table_end(addr);
-			if(table_start < vma->vm_start || table_end > vma->vm_end) {
-				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) != 1) { //dec the counter of the shared table. tfork_one_pte_table cannot find the current VMA (which is being unmapped)
+			if (table_start < vma->vm_start || table_end > vma->vm_end) {
+				if (dereference_pte_table(*pmd, false, vma->vm_mm, addr) != 1) {
+					//dec the counter of the shared table. tfork_one_pte_table cannot find the current VMA (which is being unmapped)
 					got_new_table = tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
-					if(got_new_table) {
+					if (got_new_table)
 						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-					} else {
+					else
 						pmd_clear(pmd);
-					}
 				} else {
 					// the shared table will be freed by unmap_single_vma()
 				}
@@ -1711,7 +1712,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			}
 		} else {
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-			if(!vma->pte_table_counter_pending) {
+			if (!vma->pte_table_counter_pending) {
 				atomic_dec(&(table_page->pte_table_refcount));
 			}
 		}
@@ -4726,19 +4727,20 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 
 /*  Handles an entire pte-level page table, covering multiple VMAs (if they exist)
  *  Returns true if a new table is put in place, false otherwise.
-*   if exclude is not 0, the vma that covers addr to exclude will not be copied*/
-bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude) {
+ *  if exclude is not 0, the vma that covers addr to exclude will not be copied
+ */
+bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long addr, unsigned long exclude)
+{
 	unsigned long table_end, end, orig_addr;
 	struct vm_area_struct *vma;
 	pmd_t orig_pmd_val;
 	bool copied = false;
 	int num_vmas = 0;
 
-	if(!pmd_none(*dst_pmd)) {
+	if (!pmd_none(*dst_pmd))
 		orig_pmd_val = *dst_pmd;
-	} else {
-		BUG();
-	}
+	else
+		pr_warn("pmd is none\n");
 
 	//Starts from the beginning of the range covered by the table
 	orig_addr = addr;
@@ -4746,27 +4748,20 @@ bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long add
 	addr = pte_table_start(addr);
 	do {
 		vma = find_vma(mm, addr);
-		if(!vma) {
+		if (!vma)
 			break;  //inexplicable
-		}
-		if(vma->vm_start >= table_end) {
+		if (vma->vm_start >= table_end)
 			break;
-		}
 		end = pmd_addr_end(addr, vma->vm_end);
-		if(vma->pte_table_counter_pending) {  //this vma is newly mapped (clean) and (fully/partly) described by this pte table
+		if (vma->pte_table_counter_pending) {
+			//this vma is newly mapped (clean) and (fully/partly) described by this pte table
 			addr = end;
 			continue;
 		}
-		/*if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
-			!vma->anon_vma) { //stays consistent with the standard fork (never copy tables for these VMAs)
-			addr = end;
-			continue;
-		}
-		*/
-		if(vma->vm_start > addr) {
+		if (vma->vm_start > addr) {
 			addr = vma->vm_start;
 		}
-		if(exclude>0 && vma->vm_start <= orig_addr && vma->vm_end >= exclude) {
+		if (exclude > 0 && vma->vm_start <= orig_addr && vma->vm_end >= exclude) {
 			addr = end;
 			continue;
 		}
@@ -4774,7 +4769,7 @@ bool tfork_one_pte_table(struct mm_struct *mm, pmd_t *dst_pmd, unsigned long add
 		copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
 		copied = true;
 		addr = end;
-	} while(addr<table_end);
+	} while (addr < table_end);
 
 	dereference_pte_table_multiple(orig_pmd_val, true, mm, orig_addr, num_vmas);
 	return copied;
@@ -4987,7 +4982,7 @@ retry_pud:
 			}
 		}
 		//checks if the pmd entry prohibits writes
-		if((!pmd_none(vmf.orig_pmd)) && (!pmd_iswrite(vmf.orig_pmd)) && (vma->vm_flags & VM_WRITE)) {
+		if ((!pmd_none(vmf.orig_pmd)) && (!pmd_iswrite(vmf.orig_pmd)) && (vma->vm_flags & VM_WRITE)) {
 			ptl = pmd_lock(mm, vmf.pmd);
 			tfork_one_pte_table(mm, vmf.pmd, vmf.address, 0u);
 			spin_unlock(ptl);

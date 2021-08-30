@@ -1487,7 +1487,7 @@ long populate_vma_page_range(struct vm_area_struct *vma,
 	 * and we would not want to dirty them for nothing.
 	 */
 	if ((vma->vm_flags & (VM_WRITE | VM_SHARED)) == VM_WRITE) {
-		if(!(mm->flags & MMF_USE_ODF_MASK)) { //for ODF processes, only allocate page tables
+		if (!(mm->flags & MMF_USE_ODF_MASK)) { //for ODF processes, only allocate page tables
 			gup_flags |= FOLL_WRITE;
 		}
 	}
@@ -1720,9 +1720,6 @@ int __mm_populate_nolock(unsigned long start, unsigned long len, int ignore_erro
 		nend = nstart + ret * PAGE_SIZE;
 		ret = 0;
 	}
-	/*if (locked)
-		up_read(&mm->mmap_sem);
-	*/
 	return ret;	/* 0 or negative error code */
 }
 
