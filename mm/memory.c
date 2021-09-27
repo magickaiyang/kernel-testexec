@@ -1381,8 +1381,6 @@ copy_pmd_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 					atomic_set(&(table_page->pte_table_refcount), 2);
 			}
 			set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
-			//TODO
-			copy_pte_range_experiment(dst_mm, dst_pmd, dst_vma, addr, next);
 		} else {
 			if (copy_pte_range(dst_vma, src_vma, dst_pmd, src_pmd,
 						addr, next))
