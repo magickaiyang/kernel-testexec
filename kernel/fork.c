@@ -656,6 +656,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 static void check_mm(struct mm_struct *mm)
 {
+	/*
 	int i;
 
 	BUILD_BUG_ON_MSG(ARRAY_SIZE(resident_page_types) != NR_MM_COUNTERS,
@@ -676,6 +677,7 @@ static void check_mm(struct mm_struct *mm)
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	VM_BUG_ON_MM(mm->pmd_huge_pte, mm);
 #endif
+	*/
 }
 
 #define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))

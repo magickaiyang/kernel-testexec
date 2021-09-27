@@ -1178,6 +1178,38 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 	return 0;
 }
 
+//experiment: inc physical page ref counters during odf
+static int copy_pte_range_experiment(struct mm_struct *dst_mm,
+		   pmd_t *dst_pmd, struct vm_area_struct *vma,
+		   unsigned long addr, unsigned long end)
+{
+	pte_t *dst_pte;
+	spinlock_t *dst_ptl;
+	swp_entry_t entry = (swp_entry_t){0};
+	struct page *page;
+
+	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+	if (!dst_pte)
+		BUG();
+
+	arch_enter_lazy_mmu_mode();
+
+	do {
+		if (pte_none(*dst_pte))
+			continue;
+		page = vm_normal_page(vma, addr, *dst_pte);
+		if(page) {
+			get_page(page);
+			page_dup_rmap(page,false);
+		}
+	} while (dst_pte++, addr += PAGE_SIZE, addr != end);
+
+	arch_leave_lazy_mmu_mode();
+	pte_unmap_unlock(dst_pte, dst_ptl);
+
+	return 0;
+}
+
 static int
 copy_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	       pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
@@ -1349,6 +1381,8 @@ copy_pmd_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 					atomic_set(&(table_page->pte_table_refcount), 2);
 			}
 			set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
+			//TODO
+			copy_pte_range_experiment(dst_mm, dst_pmd, dst_vma, addr, next);
 		} else {
 			if (copy_pte_range(dst_vma, src_vma, dst_pmd, src_pmd,
 						addr, next))
