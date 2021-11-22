@@ -217,17 +217,6 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pgtable_t token = pmd_pgtable(*pmd);
 	long int counter;
 	pmd_clear(pmd);
-	//kyz
-	counter = atomic64_read(&(token->pte_table_refcount));
-	if(counter > 0) {
-		//the pte table can only be shared in this case
-		//the pte table was not accounted for in this process, so no mm_dec_nr_ptes
-#ifdef CONFIG_DEBUG_VM
-		printk("free_pte_range: addr=%lx, counter=%ld, not freeing table", addr, counter);
-#endif
-		return;  //pte table is still in use
-	}
-
 	pte_free_tlb(tlb, token, addr);
 	mm_dec_nr_ptes(tlb->mm);
 }
@@ -246,9 +235,6 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		next = pmd_addr_end(addr, end);
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
-#ifdef CONFIG_DEBUG_VM
-		//printk("free hit: addr=%lx, table_page=%px\n", addr, pmd_page(*pmd));
-#endif
 		free_pte_range(tlb, pmd, addr);
 	} while (pmd++, addr = next, addr != end);
 
@@ -483,8 +469,8 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 #ifdef CONFIG_DEBUG_VM
 		printk("dereference_pte_table: addr=%lx, free_table=%d, pte table reached end of life\n", addr, free_table);
 #endif
-		zap_one_pte_table(pmd_val, addr, mm);
 		if(free_table) {
+			zap_one_pte_table(pmd_val, addr, mm);
 			pgtable_pte_page_dtor(table_page);
 			__free_page(table_page);
 			mm_dec_nr_ptes(mm);
@@ -494,8 +480,8 @@ int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, 
 #ifdef CONFIG_DEBUG_VM
 		printk("dereference_pte_table: addr=%lx, (after) pte_table_count=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
 #endif
+		return 0;
 	}
-	return 0;
 }
 
 int __tfork_pte_alloc(struct mm_struct *mm, pmd_t *pmd)
@@ -1512,12 +1498,7 @@ again:
 			print_bad_pte(vma, addr, ptent, NULL);
 		pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
 	} while (pte++, addr += PAGE_SIZE, addr != end);
-/* done in zap_pmd_range
-	if(invalidate_pmd) {
-		//kyz: instead of clearing the pte entry, we invalidate the pmd entry above us
-		set_pmd_at(vma->vm_mm, addr, pmd, pmd_mknonpresent(*pmd));
-	}
-*/
+
 	add_mm_rss_vec(mm, rss);
 	arch_leave_lazy_mmu_mode();
 
@@ -1554,7 +1535,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	spinlock_t *ptl;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
-	bool got_new_table = false;
 
 	pmd = pmd_offset(pud, addr);
 	do {
@@ -1576,46 +1556,45 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 		 */
 		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
 			goto next;
-		//kyz: copy if the pte table is shared and VMA does not cover fully the 2MB region
-		table_page = pmd_page(*pmd);
-		table_start = pte_table_start(addr);
 
-		if((!pmd_iswrite(*pmd)) && (!vma->pte_table_counter_pending)) {//shared pte table. vma has gone through odf
+		if(!pmd_iswrite(*pmd)) {
+			table_page = pmd_page(*pmd);
+			table_start = pte_table_start(addr);
 			table_end = pte_table_end(addr);
-			if(table_start < vma->vm_start || table_end > vma->vm_end) {
+			/* Sanity checks */
+			BUG_ON(table_start < vma->vm_start || table_end > vma->vm_end);
+			BUG_ON(!vma->anon_vma || (vma->vm_flags & VM_SHARED));
+
+			/* Unmaps only part of the pte table */
+			if(unlikely(table_start < addr || table_end > next)) {
 #ifdef CONFIG_DEBUG_VM
-				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, copy then zap\n", __func__, addr, end, table_start, table_end);
+				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, partial unmap\n",
+					   __func__, addr, end, table_start, table_end);
 #endif
-				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) != 1) { //dec the counter of the shared table. tfork_one_pte_table cannot find the current VMA (which is being unmapped)
-					got_new_table = tfork_one_pte_table(vma->vm_mm, pmd, addr, vma->vm_end);
-					if(got_new_table) {
-						next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-					} else {
-#ifdef CONFIG_DEBUG_VM
-						printk("zap_pmd_range: no more VMAs in this process are using the table, but there are other processes using it\n");
-#endif
-						pmd_clear(pmd);
-					}
-				} else {
-#ifdef CONFIG_DEBUG_VM
-					printk("zap_pmd_range: the shared table is dead. NOT copying after all.\n");
-#endif
-					// the shared table will be freed by unmap_single_vma()
-				}
+				tfork_one_pte_table(vma->vm_mm, vma, pmd, addr);
+				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 			} else {
+				// Unmaps the whole range covered by the PTE.
+				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) == 1) {
+					// The shared table is not in use. Let zap_pte_range dereference pages and we'll free the table later
 #ifdef CONFIG_DEBUG_VM
-				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, zap while preserving pte entries\n", __func__, addr, end, table_start, table_end);
+					printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, unused table\n",
+						   __func__, addr, end, table_start, table_end);
 #endif
-				//kyz: shared and fully covered by the VMA, preserve the pte entries
-				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-				dereference_pte_table(*pmd, true, vma->vm_mm, addr);
-				pmd_clear(pmd);
+					next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
+				} else {
+					// Still in use. Preserve the pte entries and don't free the table
+#ifdef CONFIG_DEBUG_VM
+					printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, in-use table\n",
+						   __func__, addr, end, table_start, table_end);
+#endif
+					next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+					pmd_clear(pmd);
+				}
 			}
 		} else {
+			//ODF not in effect for this VMA, table combo, so no need to manage table refcounters
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-			if(!vma->pte_table_counter_pending) {
-				atomic64_dec(&(table_page->pte_table_refcount));
-			}
 		}
 next:
 		spin_unlock(ptl);
