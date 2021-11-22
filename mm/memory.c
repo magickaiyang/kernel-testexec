@@ -1082,7 +1082,7 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		unsigned long addr, unsigned long end)
 {
 	pmd_t *src_pmd, *dst_pmd, src_pmd_value;
-	unsigned long next;
+	unsigned long next, table_start, table_end;
 	struct page *table_page;
 
 	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
@@ -1102,13 +1102,25 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 				continue;
 			/* fall through */
 		}
-
+		/*
+		** PTE tables for anon VMAs in ODF processes are created at mmap time
+		** So this should always succeed
+		 */
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
 
+		table_start = pte_table_start(addr);
+		table_end = pte_table_end(addr);
+		if(table_start < vma->vm_start || table_end > vma->vm_end) { //vma does not cover the entire pte table
 #ifdef CONFIG_DEBUG_VM
-		printk("copy_pmd_range: vm_start=%lx, addr=%lx, vm_end=%lx, end=%lx\n", vma->vm_start, addr, vma->vm_end, end);
+			printk("copy_pmd_range fallback: vm_start=%lx, addr=%lx, vm_end=%lx, end=%lx\n", vma->vm_start, addr, vma->vm_end, end);
 #endif
+			if (copy_pte_range(dst_mm, src_mm, dst_pmd, src_pmd,
+						vma, addr, next))
+				return -ENOMEM;
+			else
+				continue;
+		}
 
 		src_pmd_value = *src_pmd;
 		//kyz: sets write-protect to the pmd entry if the vma is writable
@@ -1117,25 +1129,9 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 			set_pmd_at(src_mm, addr, src_pmd, src_pmd_value);
 		}
 		table_page = pmd_page(*src_pmd);
-		if(vma->pte_table_counter_pending) { // kyz : the old VMA hasn't been counted in the PTE table, count it now
-			atomic64_add(2, &(table_page->pte_table_refcount));
-#ifdef CONFIG_DEBUG_VM
-			printk("copy_pmd_range: addr=%lx, pte table counter (after counting old&new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
-#endif
-		} else {
-			atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
-			if(atomic64_read(&(table_page->pte_table_refcount)) == 1) {  //the VMA is old, but the pte table is new (created by a fault after the last odf call)
-				atomic64_set(&(table_page->pte_table_refcount), 2);
-#ifdef CONFIG_DEBUG_VM
-				printk("copy_pmd_range: addr=%lx, pte table counter (old VMA, new pte table)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
-#endif
-			}
-#ifdef CONFIG_DEBUG_VM
-			else {
-				printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
-			}
-#endif
-		}
+		atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
+		printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+		BUG_ON(atomic64_read(&(table_page->pte_table_refcount)) < 2);
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
@@ -1299,15 +1295,22 @@ int copy_page_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	int ret;
 
 	/*
+	** Don't deal with shared mappings
+	*/
+	if(vma->vm_flags & VM_SHARED) {
+		return copy_page_range(dst_mm, src_mm, vma);
+	}
+
+	/*
 	 * Don't copy ptes where a page fault will fill them correctly.
 	 * Fork becomes much lighter when there are big shared or private
 	 * readonly mappings. The tradeoff is that copy_page_range is more
 	 * efficient than faulting.
 	 */
-	/*if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
+	if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
 			!vma->anon_vma)
 		return 0;
-*/
+
 	if (is_vm_hugetlb_page(vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, vma);
 
