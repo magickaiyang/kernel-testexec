@@ -215,7 +215,6 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token = pmd_pgtable(*pmd);
-	long int counter;
 	pmd_clear(pmd);
 	pte_free_tlb(tlb, token, addr);
 	mm_dec_nr_ptes(tlb->mm);
@@ -4409,7 +4408,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 
 /*  kyz: Handles an entire pte-level page table consisting of one private anon VMAs
  */
-static void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t *dst_pmd, unsigned long addr) {
+void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t *dst_pmd, unsigned long addr) {
 	unsigned long end, table_start, table_end;
 	pmd_t orig_pmd_val;
 

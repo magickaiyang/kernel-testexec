@@ -707,6 +707,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	 * we need to create a new one and move it..
 	 */
 	ret = -ENOMEM;
+/*
 	if (flags & MREMAP_MAYMOVE) {
 		unsigned long map_flags = 0;
 		if (vma->vm_flags & VM_MAYSHARE)
@@ -724,6 +725,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 		ret = move_vma(vma, addr, old_len, new_len, new_addr,
 			       &locked, &uf, &uf_unmap);
 	}
+*/
 out:
 	if (offset_in_page(ret)) {
 		vm_unacct_memory(charged);
