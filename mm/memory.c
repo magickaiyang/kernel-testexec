@@ -81,7 +81,7 @@
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
-static void tfork_one_pte_table(struct mm_struct *, struct vm_area_struct *, pmd_t *, unsigned long);
+void tfork_one_pte_table(struct mm_struct *, struct vm_area_struct *, pmd_t *, unsigned long);
 static inline void init_rss_vec(int *rss);
 static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss);
 #include "internal.h"

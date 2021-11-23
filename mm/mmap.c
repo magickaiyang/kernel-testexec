@@ -2660,7 +2660,7 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	if(vma->anon_vma) {
 		pmd = get_old_pmd(mm, addr);
-		if(!pmd_iswrite(*pmd)) {
+		if(pmd && !pmd_iswrite(*pmd)) {
 #ifdef CONFIG_DEBUG_VM
 			printk("split_vma: vm_start=%lx, vm_end=%lx, addr=%lxx\n",
 				   vma->vm_start, vma->vm_end, addr);
