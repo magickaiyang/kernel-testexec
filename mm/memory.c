@@ -788,14 +788,13 @@ copy_one_pte_tfork(struct mm_struct *dst_mm,
 
 	page = vm_normal_page(vma, addr, pte);
 	if (page) {
+		BUG_ON(!PageAnon(page));
 		get_page_tfork(page); //kyz :same as get_page()
 		page_dup_rmap(page, false);
 		rss[mm_counter(page)]++;
 #ifdef CONFIG_DEBUG_VM
 //		printk("copy_one_pte_tfork: addr=%lx, (after) mapcount=%d, refcount=%d\n", addr, page_mapcount(page), page_ref_count(page));
 #endif
-	} else {
-		BUG();
 	}
 
 	set_pte_at(dst_mm, addr, dst_pte, pte);
@@ -1084,7 +1083,9 @@ static inline int copy_pmd_range_tfork(struct mm_struct *dst_mm, struct mm_struc
 		}
 		table_page = pmd_page(*src_pmd);
 		atomic64_inc(&(table_page->pte_table_refcount));  //increments the pte table counter
+#ifdef CONFIG_DEBUG_VM
 		printk("copy_pmd_range: addr=%lx, pte table counter (after counting new)=%lld\n", addr, atomic64_read(&(table_page->pte_table_refcount)));
+#endif
 		BUG_ON(atomic64_read(&(table_page->pte_table_refcount)) < 2);
 		set_pmd_at(dst_mm, addr, dst_pmd, src_pmd_value);  //shares the table with the child
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
