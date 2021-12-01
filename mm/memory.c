@@ -39,6 +39,7 @@
  * Aug/Sep 2004 Changed to four level page tables (Andi Kleen)
  */
 
+#include "linux/mm_types.h"
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
@@ -206,6 +207,13 @@ static void check_sync_rss_stat(struct task_struct *task)
 }
 
 #endif /* SPLIT_RSS_COUNTING */
+
+//excludes non-anonymous or shared mappings, mappings belonging to the heap
+static inline bool is_vma_odf_incompatible(struct vm_area_struct *vma) {
+	return (!vma_is_anonymous(vma)) ||
+		vma->vm_flags & VM_SHARED ||
+		(vma->vm_start <= vma->vm_mm->brk && vma->vm_end >= vma->vm_mm->start_brk) ;
+}
 
 /*
  * Note: this doesn't free the actual pages themselves. That
@@ -940,7 +948,7 @@ static int copy_pte_range_tfork(struct mm_struct *dst_mm,
 		return -ENOMEM;
 
 	dst_pte_page = pmd_page(*dst_pmd);
-	atomic64_inc(&(dst_pte_page->pte_table_refcount)); //kyz :associates the VMA with the new table
+	// the new table has an intial counter value of 1. no need to inc here.
 #ifdef CONFIG_DEBUG_VM
 	printk("copy_pte_range_tfork: addr = %lx, end = %lx, new pte table counter (after)=%lld\n", addr, end, atomic64_read(&(dst_pte_page->pte_table_refcount)));
 #endif
@@ -1250,9 +1258,9 @@ int copy_page_range_tfork(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	int ret;
 
 	/*
-	** Don't deal with shared mappings
+	** Don't deal with shared or non-anonymous mappings
 	*/
-	if(vma->vm_flags & VM_SHARED) {
+	if(is_vma_odf_incompatible(vma)) {
 		return copy_page_range(dst_mm, src_mm, vma);
 	}
 
@@ -1563,8 +1571,7 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			table_end = pte_table_end(addr);
 			/* Sanity checks */
 			BUG_ON(table_start < vma->vm_start || table_end > vma->vm_end);
-			BUG_ON(!vma->anon_vma || (vma->vm_flags & VM_SHARED));
-
+			BUG_ON(is_vma_odf_incompatible(vma));
 			/* Unmaps only part of the pte table */
 			if(unlikely(table_start < addr || table_end > next)) {
 #ifdef CONFIG_DEBUG_VM
@@ -4419,7 +4426,7 @@ void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t
 	table_start = pte_table_start(addr);
 	table_end = pte_table_end(addr);
 	BUG_ON(table_start < vma->vm_start || table_end > vma->vm_end);
-	BUG_ON(!vma->anon_vma || (vma->vm_flags & VM_SHARED));
+	BUG_ON(is_vma_odf_incompatible(vma));
 
 	end = pmd_addr_end(addr, vma->vm_end);
 #ifdef CONFIG_DEBUG_VM
