@@ -1572,32 +1572,25 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			/* Sanity checks */
 			BUG_ON(table_start < vma->vm_start || table_end > vma->vm_end);
 			BUG_ON(is_vma_odf_incompatible(vma));
-			/* Unmaps only part of the pte table */
-			if(unlikely(table_start < addr || table_end > next)) {
+			/* When unmapping only part of the VMA,
+			 * the VMA should have already been split and the pte table unshared. */
+			BUG_ON(table_start < addr || table_end > next);
+			// So the only case: unmaps the whole range covered by the PTE.
+			if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) == 1) {
+				// The shared table is not in use. Let zap_pte_range dereference pages and we'll free the table later
 #ifdef CONFIG_DEBUG_VM
-				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, partial unmap\n",
+				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, unused table\n",
 					   __func__, addr, end, table_start, table_end);
 #endif
-				tfork_one_pte_table(vma->vm_mm, vma, pmd, addr);
 				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 			} else {
-				// Unmaps the whole range covered by the PTE.
-				if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) == 1) {
-					// The shared table is not in use. Let zap_pte_range dereference pages and we'll free the table later
+				// Still in use. Preserve the pte entries and don't free the table
 #ifdef CONFIG_DEBUG_VM
-					printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, unused table\n",
-						   __func__, addr, end, table_start, table_end);
+				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, in-use table\n",
+					   __func__, addr, end, table_start, table_end);
 #endif
-					next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
-				} else {
-					// Still in use. Preserve the pte entries and don't free the table
-#ifdef CONFIG_DEBUG_VM
-					printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, in-use table\n",
-						   __func__, addr, end, table_start, table_end);
-#endif
-					next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-					pmd_clear(pmd);
-				}
+				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+				pmd_clear(pmd);
 			}
 		} else {
 			//ODF not in effect for this VMA, table combo, so no need to manage table refcounters
@@ -4417,7 +4410,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 /*  kyz: Handles an entire pte-level page table consisting of one private anon VMAs
  */
 void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t *dst_pmd, unsigned long addr) {
-	unsigned long end, table_start, table_end;
+	unsigned long table_start, table_end;
 	pmd_t orig_pmd_val;
 
 	//sanity checks
@@ -4428,12 +4421,11 @@ void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t
 	BUG_ON(table_start < vma->vm_start || table_end > vma->vm_end);
 	BUG_ON(is_vma_odf_incompatible(vma));
 
-	end = pmd_addr_end(addr, vma->vm_end);
 #ifdef CONFIG_DEBUG_VM
 	printk("tfork_one_pte_table: vm_start=%lx, vm_end=%lx, addr=%lx, end=%lx\n",
 		   vma->vm_start, vma->vm_end, addr, end);
 #endif
-	copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, addr, end);
+	copy_pte_range_tfork(mm, dst_pmd, orig_pmd_val, vma, table_start, table_end);
 
 	dereference_pte_table(orig_pmd_val, true, mm, addr);
 }
