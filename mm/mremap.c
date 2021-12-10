@@ -248,6 +248,7 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 	unsigned long extent, next, old_end;
 	struct mmu_notifier_range range;
 	pmd_t *old_pmd, *new_pmd;
+	spinlock_t *ptl;
 
 	old_end = old_addr + len;
 	flush_cache_range(vma, old_addr, old_end);
@@ -271,7 +272,9 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 			printk("mremap: vm_start=%lx, vm_end=%lx, old_addr=%lx\n",
 				   vma->vm_start, vma->vm_end, old_addr);
 #endif
+			ptl = pmd_lock(vma->vm_mm, old_pmd);
 			tfork_one_pte_table(vma->vm_mm, vma, old_pmd, old_addr);
+			spin_unlock(ptl);
 		}
 	new_pmd = alloc_new_pmd(vma->vm_mm, vma, new_addr);
 		if (!new_pmd)

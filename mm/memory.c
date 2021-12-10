@@ -465,7 +465,10 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
    add_mm_rss_vec(mm, rss);
 }
 
-/* pmd lock should be held
+/* pmd lock should be held (not the pte table lock)
+ * The only place where a shared table is destroyed, and concurrent attempts to destroy a shared pte table
+ * is mediated by the atomic counter.
+ *
  * Dereferences a shared pte table and frees it if requested and the table is unused.
  * returns 1 if the table becomes unused */
 int dereference_pte_table(pmd_t pmd_val, bool free_table, struct mm_struct *mm, unsigned long addr) {
@@ -1575,23 +1578,29 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			/* When unmapping only part of the VMA,
 			 * the VMA should have already been split and the pte table unshared. */
 			BUG_ON(table_start < addr || table_end > next);
-			// So the only case: unmaps the whole range covered by the PTE.
-			if(dereference_pte_table(*pmd, false, vma->vm_mm, addr) == 1) {
-				// The shared table is not in use. Let zap_pte_range dereference pages and we'll free the table later
+			/* So the only case: unmaps the whole range covered by the PTE.
+			 * We first use zap_pte_range() to strike down TLB entries
+			 * without touching the shared PTE table or page ref counters.
+			 */
+			next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
+			/* Then let dereference_pte_table() to exclusively handle shared table freeing */
+			if(dereference_pte_table(*pmd, true, vma->vm_mm, addr) == 1) {
+				// The shared table is not in use.
 #ifdef CONFIG_DEBUG_VM
 				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, unused table\n",
 					   __func__, addr, end, table_start, table_end);
 #endif
-				next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 			} else {
-				// Still in use. Preserve the pte entries and don't free the table
+				// Still in use.
 #ifdef CONFIG_DEBUG_VM
 				printk("%s: addr=%lx, end=%lx, table_start=%lx, table_end=%lx, full unmap, in-use table\n",
 					   __func__, addr, end, table_start, table_end);
 #endif
-				next = zap_pte_range(tlb, vma, pmd, addr, next, details, true);
-				pmd_clear(pmd);
 			}
+			/* The process is not a user of the shared table anymore.
+			 * Must clear pmd entry to avoid attempting to free the PTE table.
+			 */
+			pmd_clear(pmd);
 		} else {
 			//ODF not in effect for this VMA, table combo, so no need to manage table refcounters
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
@@ -4408,6 +4417,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table consisting of one private anon VMAs
+ *  The pmd lock should be held (the shared pte table is NOT locked).
  */
 void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t *dst_pmd, unsigned long addr) {
 	unsigned long table_start, table_end;

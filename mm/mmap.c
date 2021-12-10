@@ -2651,6 +2651,7 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *new;
 	pmd_t *pmd;
 	int err;
+	spinlock_t *ptl;
 
 	if (vma->vm_ops && vma->vm_ops->split) {
 		err = vma->vm_ops->split(vma, addr);
@@ -2665,7 +2666,9 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 			printk("split_vma: vm_start=%lx, vm_end=%lx, addr=%lxx\n",
 				   vma->vm_start, vma->vm_end, addr);
 #endif
+			ptl = pmd_lock(mm, pmd);
 			tfork_one_pte_table(mm, vma, pmd, addr);
+			spin_unlock(ptl);
 		}
 	}
 
