@@ -465,7 +465,7 @@ void zap_one_pte_table(pmd_t pmd_val, unsigned long addr, struct mm_struct *mm) 
    add_mm_rss_vec(mm, rss);
 }
 
-/* pmd lock should be held (not the pte table lock)
+/* pmd lock should be held (not the pte table lock), or mmap_sem write lock is held.
  * The only place where a shared table is destroyed, and concurrent attempts to destroy a shared pte table
  * is mediated by the atomic counter.
  *
@@ -1543,13 +1543,11 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 				struct zap_details *details)
 {
 	pmd_t *pmd;
-	spinlock_t *ptl;
 	struct page *table_page;
 	unsigned long next, table_start, table_end;
 
 	pmd = pmd_offset(pud, addr);
 	do {
-		ptl = pmd_lock(vma->vm_mm, pmd);
 		next = pmd_addr_end(addr, end);
 		if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
 			if (next - addr != HPAGE_PMD_SIZE)
@@ -1606,7 +1604,6 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			next = zap_pte_range(tlb, vma, pmd, addr, next, details, false);
 		}
 next:
-		spin_unlock(ptl);
 		cond_resched();
 	} while (pmd++, addr = next, addr != end);
 
@@ -4417,7 +4414,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
 }
 
 /*  kyz: Handles an entire pte-level page table consisting of one private anon VMAs
- *  The pmd lock should be held (the shared pte table is NOT locked).
+ *  The pmd lock should be held (the shared pte table is NOT locked), or mmap_sem write lock is held.
  */
 void tfork_one_pte_table(struct mm_struct *mm, struct vm_area_struct *vma, pmd_t *dst_pmd, unsigned long addr) {
 	unsigned long table_start, table_end;
@@ -4634,15 +4631,15 @@ retry_pud:
 			}
 		}
 
-		//kyz: checks if the pmd entry prohibits writes
-		if((!pmd_none(orig_pmd)) && (!pmd_iswrite(orig_pmd)) && (vma->vm_flags & VM_WRITE)) {
+		ptl = pmd_lock(mm, vmf.pmd);
+		// checks if the pmd entry prohibits writes
+		if((!pmd_none(*vmf.pmd)) && (!pmd_iswrite(*vmf.pmd)) && (vma->vm_flags & VM_WRITE)) {
 #ifdef CONFIG_DEBUG_VM
 			printk("__handle_mm_fault: PID=%d, addr=%lx\n", current->pid, address);
 #endif
-			ptl = pmd_lock(mm, vmf.pmd);
 			tfork_one_pte_table(mm, vma, vmf.pmd, vmf.address);
-			spin_unlock(ptl);
 		}
+		spin_unlock(ptl);
 	}
 
 	return handle_pte_fault(&vmf);

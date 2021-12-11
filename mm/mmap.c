@@ -2651,7 +2651,6 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *new;
 	pmd_t *pmd;
 	int err;
-	spinlock_t *ptl;
 
 	if (vma->vm_ops && vma->vm_ops->split) {
 		err = vma->vm_ops->split(vma, addr);
@@ -2661,17 +2660,18 @@ int __split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	if(vma->anon_vma) {
 		pmd = get_old_pmd(mm, addr);
-		if(pmd && !pmd_iswrite(*pmd)) {
+		if(!pmd)
+			goto skip_check;
+		if(!pmd_iswrite(*pmd)) {
 #ifdef CONFIG_DEBUG_VM
 			printk("split_vma: vm_start=%lx, vm_end=%lx, addr=%lxx\n",
 				   vma->vm_start, vma->vm_end, addr);
 #endif
-			ptl = pmd_lock(mm, pmd);
 			tfork_one_pte_table(mm, vma, pmd, addr);
-			spin_unlock(ptl);
 		}
 	}
 
+skip_check:
 	new = vm_area_dup(vma);
 	if (!new)
 		return -ENOMEM;
